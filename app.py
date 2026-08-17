@@ -27,7 +27,12 @@ except Exception as e:
     st.error(f"Google Sheets bağlantı hatası: {e}")
 
 # 3. Sol Menü - Navigasyon
-sayfa = st.sidebar.radio("Menü", ["Haftalık Görüşme Takvimi", "Haftalık Planı Manuel Düzenle", "Yeni Danışan Ekle", "Tüm Danışan Listesi"])
+sayfa = st.sidebar.radio("Menü", [
+    "Haftalık Görüşme Takvimi", 
+    "Haftalık Planı Manuel Düzenle & Yoklama", 
+    "Yeni Danışan Ekle", 
+    "Tüm Danışan Listesi"
+])
 
 # --- SAYFA 1: HAFTALIK GÖRÜŞME TAKVİMİ ---
 if sayfa == "Haftalık Görüşme Takvimi":
@@ -57,7 +62,7 @@ if sayfa == "Haftalık Görüşme Takvimi":
                 atanan_fd = row.get("Atanan FD") or row.get("Atanan Felsefi Danışman", "-")
                 atanan_psk = row.get("Atanan Psikolog", "-")
 
-                # Otomatik kural
+                # Varsayılan döngü kuralı
                 if platform_val == "SG":
                     if dongu_haftasi in [1, 3]:
                         oto_gorusme = "Felsefi Danışmanlık"
@@ -72,31 +77,33 @@ if sayfa == "Haftalık Görüşme Takvimi":
                     oto_gorusme = "Mod7 Seans"
                     oto_uzman = atanan_fd
 
-                # Manuel atama varsa öncelikli al, yoksa otomatiği kullan
                 gorusme_tipi = row.get("Bu Haftaki Görüşme") or oto_gorusme
                 uzman = row.get("Bu Haftaki Uzman") or oto_uzman
+                durum = row.get("Görüşme Durumu") or "⏳ Bekliyor"
+                gecen_haftaki_uzman = row.get("Geçen Haftaki Uzman") or "-"
 
                 haftalik_liste.append({
-                    "ID": row.get("ID", index + 1),
                     "Danışan": row.get("Ad Soyad") or row.get("Ad_Soyad", "-"),
                     "Platform": platform_val,
                     "Hafta": f"{gecen_hafta}. Hafta (Döngü: {dongu_haftasi})",
                     "Görüşme Tipi": gorusme_tipi,
-                    "Sorumlu Uzman": uzman,
+                    "Bu Haftaki Uzman": uzman,
+                    "Geçen Haftaki Uzman": gecen_haftaki_uzman,
+                    "Durum": "✅ Yapıldı" if durum in [True, "Yapıldı", "True", "true"] else "⏳ Bekliyor",
                     "Kulüp/Mevki": f"{row.get('Kulup', row.get('Kulübü', ''))} / {row.get('Mevki', row.get('Mevkisi', ''))}",
                     "İletişim": row.get("Telefon") or row.get("İletişim", "-")
                 })
                 
             st.dataframe(pd.DataFrame(haftalik_liste), use_container_width=True)
-            st.caption("💡 Otomatik atanan uzmanı veya görüşme tipini değiştirmek için sol menüden 'Haftalık Planı Manuel Düzenle' sekmesini kullanabilirsiniz.")
+            st.caption("💡 Seansı onaylamak (yapıldı/yapılmadı) veya uzman değiştirmek için sol menüden **'Haftalık Planı Manuel Düzenle & Yoklama'** sekmesine geçin.")
         else:
-            st.info("ℹ️ Henüz kayıtlı danışan bulunmuyor.")
+            st.info("ℹ️ Tabloda kayıtlı danışan bulunmuyor.")
     except Exception as e:
         st.warning(f"Veriler okunurken bir hata oluştu: {e}")
 
-# --- SAYFA 2: MANUEL DÜZENLEME & ÖZEL UZMAN ATAMA ---
-elif sayfa == "Haftalık Planı Manuel Düzenle":
-    st.subheader("✍️ Bu Haftalık Uzman ve Görüşme Ataması")
+# --- SAYFA 2: MANUEL DÜZENLEME & YOKLAMA ---
+elif sayfa == "Haftalık Planı Manuel Düzenle & Yoklama":
+    st.subheader("✍️ Haftalık Plan Güncelleme ve Seans Takibi")
     
     try:
         data = danisanlar_sheet.get_all_records()
@@ -108,11 +115,31 @@ elif sayfa == "Haftalık Planı Manuel Düzenle":
             
             secilen_satir = df[df["Ad Soyad"] == secilen_danisan].iloc[0] if "Ad Soyad" in df.columns else df[df["Ad_Soyad"] == secilen_danisan].iloc[0]
             satir_no = df[df["Ad Soyad"] == secilen_danisan].index[0] + 2
-            
-            with st.form("manuel_duzenleme_formu"):
-                col1, col2 = st.columns(2)
-                
-                with col1:
+
+            # Geçmiş ve mevcut bilgileri gösteren kartlar
+            mevcut_uzman = secilen_satir.get("Bu Haftaki Uzman") or secilen_satir.get("Atanan FD", "-")
+            mevcut_gorusme = secilen_satir.get("Bu Haftaki Görüşme") or "Felsefi Danışmanlık"
+            gecen_uzman = secilen_satir.get("Geçen Haftaki Uzman") or "-"
+            gecen_gorusme = secilen_satir.get("Geçen Haftaki Görüşme") or "-"
+            mevcut_durum = secilen_satir.get("Görüşme Durumu") in [True, "Yapıldı", "True", "true"]
+
+            st.markdown("---")
+            col_info1, col_info2, col_info3 = st.columns(3)
+            with col_info1:
+                st.metric("Geçen Haftaki Uzman", f"{gecen_uzman}")
+            with col_info2:
+                st.metric("Geçen Haftaki Görüşme", f"{gecen_gorusme}")
+            with col_info3:
+                st.metric("Son Durum", "✅ Yapıldı" if mevcut_durum else "⏳ Bekliyor")
+            st.markdown("---")
+
+            with st.form("manuel_duzenleme_ve_yoklama_formu"):
+                st.markdown("#### 1. Seans Tamamlanma Durumu (Yoklama)")
+                yapildi_mi = st.checkbox("✅ Bu haftaki görüşme başarıyla yapıldı", value=mevcut_durum)
+
+                st.markdown("#### 2. Yeni Hafta / Bu Haftaki Atama")
+                c1, c2 = st.columns(2)
+                with c1:
                     gorusme_secenekleri = [
                         "Felsefi Danışmanlık",
                         "Psikolog Seansı",
@@ -123,29 +150,33 @@ elif sayfa == "Haftalık Planı Manuel Düzenle":
                         "Pas / Görüşme Yok",
                         "Özel Seans"
                     ]
-                    yeni_gorusme = st.selectbox("Bu Haftaki Görüşme Tipi", gorusme_secenekleri)
+                    idx = gorusme_secenekleri.index(mevcut_gorusme) if mevcut_gorusme in gorusme_secenekleri else 0
+                    yeni_gorusme = st.selectbox("Görüşme Tipi", gorusme_secenekleri, index=idx)
                 
-                with col2:
-                    yeni_uzman = st.text_input("Bu Haftaki Sorumlu Uzman", value=str(secilen_satir.get("Atanan FD", "")))
-                
-                kaydet = st.form_submit_button("Haftalık Atamayı Güncelle")
+                with c2:
+                    yeni_uzman = st.text_input("Sorumlu Uzman", value=str(mevcut_uzman))
+
+                kaydet = st.form_submit_button("Bilgileri Kaydet ve Güncelle")
                 
                 if kaydet:
                     headers = danisanlar_sheet.row_values(1)
-                    if "Bu Haftaki Görüşme" not in headers:
-                        danisanlar_sheet.update_cell(1, len(headers) + 1, "Bu Haftaki Görüşme")
-                        headers.append("Bu Haftaki Görüşme")
-                    if "Bu Haftaki Uzman" not in headers:
-                        danisanlar_sheet.update_cell(1, len(headers) + 1, "Bu Haftaki Uzman")
-                        headers.append("Bu Haftaki Uzman")
+                    gerekli_sutunlar = ["Bu Haftaki Görüşme", "Bu Haftaki Uzman", "Geçen Haftaki Görüşme", "Geçen Haftaki Uzman", "Görüşme Durumu"]
                     
-                    gorusme_col = headers.index("Bu Haftaki Görüşme") + 1
-                    uzman_col = headers.index("Bu Haftaki Uzman") + 1
+                    for sutun in gerekli_sutunlar:
+                        if sutun not in headers:
+                            danisanlar_sheet.update_cell(1, len(headers) + 1, sutun)
+                            headers.append(sutun)
+
+                    # Eğer seans yapıldı işaretlendiyse veya yeni haftaya geçiliyorsa mevcut uzmanı geçen haftaya aktarır
+                    if yapildi_mi and not mevcut_durum:
+                        danisanlar_sheet.update_cell(satir_no, headers.index("Geçen Haftaki Görüşme") + 1, str(mevcut_gorusme))
+                        danisanlar_sheet.update_cell(satir_no, headers.index("Geçen Haftaki Uzman") + 1, str(mevcut_uzman))
+
+                    danisanlar_sheet.update_cell(satir_no, headers.index("Bu Haftaki Görüşme") + 1, str(yeni_gorusme))
+                    danisanlar_sheet.update_cell(satir_no, headers.index("Bu Haftaki Uzman") + 1, str(yeni_uzman))
+                    danisanlar_sheet.update_cell(satir_no, headers.index("Görüşme Durumu") + 1, "Yapıldı" if yapildi_mi else "Bekliyor")
                     
-                    danisanlar_sheet.update_cell(satir_no, gorusme_col, yeni_gorusme)
-                    danisanlar_sheet.update_cell(satir_no, uzman_col, yeni_uzman)
-                    
-                    st.success(f"{secilen_danisan} için bu haftaki atama '{yeni_uzman} ({yeni_gorusme})' olarak güncellendi!")
+                    st.success(f"{secilen_danisan} için kayıt güncellendi! Durum: {'✅ Yapıldı' if yapildi_mi else '⏳ Bekliyor'}")
                     st.cache_resource.clear()
         else:
             st.info("Kayıtlı danışan bulunamadı.")
@@ -186,6 +217,7 @@ elif sayfa == "Yeni Danışan Ekle":
                 ]
                 danisanlar_sheet.append_row(yeni_satir)
                 st.success(f"{ad_soyad} başarıyla sisteme eklendi!")
+                st.cache_resource.clear()
             except Exception as e:
                 st.error(f"Kayıt eklenirken bir hata oluştu: {e}")
 
