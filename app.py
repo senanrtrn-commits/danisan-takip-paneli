@@ -1,6 +1,7 @@
 import streamlit as st
 import pandas as pd
 import gspread
+import json
 from datetime import datetime
 
 # 1. Sayfa Ayarları
