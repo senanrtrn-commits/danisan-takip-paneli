@@ -1,32 +1,28 @@
 import streamlit as st
-import os
 import pandas as pd
 import gspread
 from datetime import datetime
 
-# Canlı sunucudaki secret anahtarını dosyaya yazar
-if not os.path.exists("credentials.json") and "gcp_json" in st.secrets:
-    with open("credentials.json", "w") as f:
-        f.write(st.secrets["gcp_json"])
-
-# 1. Sayfa Ayarları (En başta olmalıdır)
+# 1. Sayfa Ayarları
 st.set_page_config(page_title="Mod7 & SG Danışan Takip Paneli", layout="wide")
 st.title("⚽ Mod7 & Sporcu Gelişimi Platformu – Danışan Takip Paneli")
 
 # 2. Google Sheets Bağlantısı
 @st.cache_resource
 def get_google_sheet():
-    # Klasörünüzdeki credentials.json dosyasını okur
-    gc = gspread.service_account(filename="credentials.json")
-    # Google Sheets belgenizin adıyla birebir aynı olmalıdır
-    sheet = gc.open("Danisan_Takip_Sistemi") 
+    if "gcp_service_account" in st.secrets:
+        gc = gspread.service_account_from_dict(dict(st.secrets["gcp_service_account"]))
+    else:
+        gc = gspread.service_account(filename="credentials.json")
+    
+    sheet = gc.open("Danisan_Takip_Sistemi")
     return sheet
 
 try:
     sheet = get_google_sheet()
     danisanlar_sheet = sheet.worksheet("Danisanlar")
 except Exception as e:
-    st.error(f"Google Sheets bağlantı hatası! Lütfen credentials.json dosyasını ve sayfa adını kontrol edin: {e}")
+    st.error(f"Google Sheets bağlantı hatası: {e}")
 
 # 3. Sol Menü - Navigasyon
 sayfa = st.sidebar.radio("Menü", ["Haftalık Görüşme Takvimi", "Yeni Danışan Ekle", "Tüm Danışan Listesi"])
