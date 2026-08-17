@@ -30,6 +30,7 @@ except Exception as e:
 sayfa = st.sidebar.radio("Menü", ["Haftalık Görüşme Takvimi", "Yeni Danışan Ekle", "Tüm Danışan Listesi"])
 
 # --- SAYFA 1: HAFTALIK GÖRÜŞME TAKVİMİ ---
+# --- SAYFA 1: HAFTALIK GÖRÜŞME TAKVİMİ ---
 if sayfa == "Haftalık Görüşme Takvimi":
     st.subheader("🗓️ Bu Haftanın Görüşme Planı")
     
@@ -41,26 +42,53 @@ if sayfa == "Haftalık Görüşme Takvimi":
             bugun = datetime.now()
             haftalik_liste = []
             
+            # Sütun isimlerini normalize edelim (büyük/küçük harf ve Türkçe karakter toleransı)
             for index, row in df.iterrows():
-                baslangic = datetime.strptime(str(row["Baslangic Tarihi"]), "%Y-%m-%d")
-                gecen_hafta = ((bugun - baslangic).days // 7) + 1
+                # Başlangıç tarihini bulma
+                tarih_val = row.get("Baslangic Tarihi") or row.get("Başlangıç Tarihi") or row.get("Baslangic_Tarihi") or str(bugun.date())
+                try:
+                    baslangic = datetime.strptime(str(tarih_val).strip(), "%Y-%m-%d")
+                except Exception:
+                    baslangic = bugun
+
+                gecen_hafta = max(1, ((bugun - baslangic).days // 7) + 1)
                 dongu_haftasi = gecen_hafta % 4
                 if dongu_haftasi == 0: 
                     dongu_haftasi = 4
 
-                if str(row["Platform"]).strip().upper() == "SG":
+                platform_val = str(row.get("Platform", "")).strip().upper()
+                atanan_fd = row.get("Atanan FD") or row.get("Atanan Felsefi Danışman", "-")
+                atanan_psk = row.get("Atanan Psikolog", "-")
+
+                if platform_val == "SG":
                     if dongu_haftasi in [1, 3]:
                         gorusme_tipi = "Felsefi Danışmanlık (Çocuk)"
-                        uzman = row["Atanan FD"]
+                        uzman = atanan_fd
                     elif dongu_haftasi == 2:
                         gorusme_tipi = "Psikolog (Çocuk)"
-                        uzman = row["Atanan Psikolog"]
+                        uzman = atanan_psk
                     elif dongu_haftasi == 4:
                         gorusme_tipi = "Psikolog (Çocuk) + Aile Görüşmesi"
-                        uzman = row["Atanan Psikolog"]
+                        uzman = atanan_psk
                 else:
                     gorusme_tipi = "Mod7 Bireysel Seans"
-                    uzman = row["Atanan FD"]
+                    uzman = atanan_fd
+
+                haftalik_liste.append({
+                    "Danışan": row.get("Ad Soyad") or row.get("Ad_Soyad", "-"),
+                    "Platform": platform_val,
+                    "Hafta": f"{gecen_hafta}. Hafta (Döngü: {dongu_haftasi})",
+                    "Görüşme Tipi": gorusme_tipi,
+                    "Sorumlu Uzman": uzman,
+                    "Kulüp/Mevki": f"{row.get('Kulup', row.get('Kulübü', ''))} / {row.get('Mevki', row.get('Mevkisi', ''))}",
+                    "İletişim": row.get("Telefon") or row.get("İletişim", "-")
+                })
+                
+            st.dataframe(pd.DataFrame(haftalik_liste), use_container_width=True)
+        else:
+            st.info("ℹ️ Tabloda henüz kayıtlı danışan bulunmuyor. Sol menüden 'Yeni Danışan Ekle' kısmından ilk kaydı oluşturabilirsiniz.")
+    except Exception as e:
+        st.warning(f"Veriler okunurken bir hata oluştu: {e}")
 
                 haftalik_liste.append({
                     "Danışan": row["Ad Soyad"],
