@@ -27,7 +27,7 @@ except Exception as e:
     st.error(f"Google Sheets bağlantı hatası: {e}")
 
 # 3. Sol Menü - Navigasyon
-sayfa = st.sidebar.radio("Menü", ["Haftalık Görüşme Takvimi", "Yeni Danışan Ekle", "Tüm Danışan Listesi"])
+sayfa = st.sidebar.radio("Menü", ["Haftalık Görüşme Takvimi", "Haftalık Planı Manuel Düzenle", "Yeni Danışan Ekle", "Tüm Danışan Listesi"])
 
 # --- SAYFA 1: HAFTALIK GÖRÜŞME TAKVİMİ ---
 if sayfa == "Haftalık Görüşme Takvimi":
@@ -57,21 +57,27 @@ if sayfa == "Haftalık Görüşme Takvimi":
                 atanan_fd = row.get("Atanan FD") or row.get("Atanan Felsefi Danışman", "-")
                 atanan_psk = row.get("Atanan Psikolog", "-")
 
+                # Otomatik kural
                 if platform_val == "SG":
                     if dongu_haftasi in [1, 3]:
-                        gorusme_tipi = "Felsefi Danışmanlık (Çocuk)"
-                        uzman = atanan_fd
+                        oto_gorusme = "Felsefi Danışmanlık"
+                        oto_uzman = atanan_fd
                     elif dongu_haftasi == 2:
-                        gorusme_tipi = "Psikolog (Çocuk)"
-                        uzman = atanan_psk
+                        oto_gorusme = "Psikolog"
+                        oto_uzman = atanan_psk
                     elif dongu_haftasi == 4:
-                        gorusme_tipi = "Psikolog (Çocuk) + Aile Görüşmesi"
-                        uzman = atanan_psk
+                        oto_gorusme = "Psikolog + Aile Görüşmesi"
+                        oto_uzman = atanan_psk
                 else:
-                    gorusme_tipi = "Mod7 Bireysel Seans"
-                    uzman = atanan_fd
+                    oto_gorusme = "Mod7 Seans"
+                    oto_uzman = atanan_fd
+
+                # Manuel atama varsa öncelikli al, yoksa otomatiği kullan
+                gorusme_tipi = row.get("Bu Haftaki Görüşme") or oto_gorusme
+                uzman = row.get("Bu Haftaki Uzman") or oto_uzman
 
                 haftalik_liste.append({
+                    "ID": row.get("ID", index + 1),
                     "Danışan": row.get("Ad Soyad") or row.get("Ad_Soyad", "-"),
                     "Platform": platform_val,
                     "Hafta": f"{gecen_hafta}. Hafta (Döngü: {dongu_haftasi})",
@@ -82,12 +88,71 @@ if sayfa == "Haftalık Görüşme Takvimi":
                 })
                 
             st.dataframe(pd.DataFrame(haftalik_liste), use_container_width=True)
+            st.caption("💡 Otomatik atanan uzmanı veya görüşme tipini değiştirmek için sol menüden 'Haftalık Planı Manuel Düzenle' sekmesini kullanabilirsiniz.")
         else:
-            st.info("ℹ️ Henüz kayıtlı danışan bulunmuyor. Sol menüden 'Yeni Danışan Ekle' bölümünden kayıt oluşturabilirsiniz.")
+            st.info("ℹ️ Henüz kayıtlı danışan bulunmuyor.")
     except Exception as e:
         st.warning(f"Veriler okunurken bir hata oluştu: {e}")
 
-# --- SAYFA 2: YENİ DANIŞAN EKLE ---
+# --- SAYFA 2: MANUEL DÜZENLEME & ÖZEL UZMAN ATAMA ---
+elif sayfa == "Haftalık Planı Manuel Düzenle":
+    st.subheader("✍️ Bu Haftalık Uzman ve Görüşme Ataması")
+    
+    try:
+        data = danisanlar_sheet.get_all_records()
+        df = pd.DataFrame(data)
+        
+        if not df.empty:
+            danisan_adlari = df["Ad Soyad"].tolist() if "Ad Soyad" in df.columns else df["Ad_Soyad"].tolist()
+            secilen_danisan = st.selectbox("Düzenlemek İstediğiniz Danışanı Seçin", danisan_adlari)
+            
+            secilen_satir = df[df["Ad Soyad"] == secilen_danisan].iloc[0] if "Ad Soyad" in df.columns else df[df["Ad_Soyad"] == secilen_danisan].iloc[0]
+            satir_no = df[df["Ad Soyad"] == secilen_danisan].index[0] + 2
+            
+            with st.form("manuel_duzenleme_formu"):
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    gorusme_secenekleri = [
+                        "Felsefi Danışmanlık",
+                        "Psikolog Seansı",
+                        "Aile Görüşmesi",
+                        "İletişim & Medya Seansı",
+                        "Sosyal Medya Çalışması",
+                        "İngilizce / Dil Seansı",
+                        "Pas / Görüşme Yok",
+                        "Özel Seans"
+                    ]
+                    yeni_gorusme = st.selectbox("Bu Haftaki Görüşme Tipi", gorusme_secenekleri)
+                
+                with col2:
+                    yeni_uzman = st.text_input("Bu Haftaki Sorumlu Uzman", value=str(secilen_satir.get("Atanan FD", "")))
+                
+                kaydet = st.form_submit_button("Haftalık Atamayı Güncelle")
+                
+                if kaydet:
+                    headers = danisanlar_sheet.row_values(1)
+                    if "Bu Haftaki Görüşme" not in headers:
+                        danisanlar_sheet.update_cell(1, len(headers) + 1, "Bu Haftaki Görüşme")
+                        headers.append("Bu Haftaki Görüşme")
+                    if "Bu Haftaki Uzman" not in headers:
+                        danisanlar_sheet.update_cell(1, len(headers) + 1, "Bu Haftaki Uzman")
+                        headers.append("Bu Haftaki Uzman")
+                    
+                    gorusme_col = headers.index("Bu Haftaki Görüşme") + 1
+                    uzman_col = headers.index("Bu Haftaki Uzman") + 1
+                    
+                    danisanlar_sheet.update_cell(satir_no, gorusme_col, yeni_gorusme)
+                    danisanlar_sheet.update_cell(satir_no, uzman_col, yeni_uzman)
+                    
+                    st.success(f"{secilen_danisan} için bu haftaki atama '{yeni_uzman} ({yeni_gorusme})' olarak güncellendi!")
+                    st.cache_resource.clear()
+        else:
+            st.info("Kayıtlı danışan bulunamadı.")
+    except Exception as e:
+        st.error(f"Hata: {e}")
+
+# --- SAYFA 3: YENİ DANIŞAN EKLE ---
 elif sayfa == "Yeni Danışan Ekle":
     st.subheader("➕ Yeni Danışan Kaydı")
     
@@ -124,7 +189,7 @@ elif sayfa == "Yeni Danışan Ekle":
             except Exception as e:
                 st.error(f"Kayıt eklenirken bir hata oluştu: {e}")
 
-# --- SAYFA 3: TÜM DANIŞAN LİSTESİ ---
+# --- SAYFA 4: TÜM DANIŞAN LİSTESİ ---
 elif sayfa == "Tüm Danışan Listesi":
     st.subheader("📋 Sistemdeki Tüm Danışanlar")
     try:
