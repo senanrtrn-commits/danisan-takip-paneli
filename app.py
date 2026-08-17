@@ -1,17 +1,17 @@
 import streamlit as st
 import os
-
-if not os.path.exists("credentials.json") and "gcp_json" in st.secrets:
-    with open("credentials.json", "w") as f:
-        f.write(st.secrets["gcp_json"])
-        import streamlit as st
 import pandas as pd
 import gspread
 from datetime import datetime
 
-# 1. Sayfa Ayarları
+# Canlı sunucudaki secret anahtarını dosyaya yazar
+if not os.path.exists("credentials.json") and "gcp_json" in st.secrets:
+    with open("credentials.json", "w") as f:
+        f.write(st.secrets["gcp_json"])
+
+# 1. Sayfa Ayarları (En başta olmalıdır)
 st.set_page_config(page_title="Mod7 & SG Danışan Takip Paneli", layout="wide")
-st.title("⚽ Mod7 & Sporcu Gelişimi Platformu - Danışan Takip Paneli")
+st.title("⚽ Mod7 & Sporcu Gelişimi Platformu – Danışan Takip Paneli")
 
 # 2. Google Sheets Bağlantısı
 @st.cache_resource
