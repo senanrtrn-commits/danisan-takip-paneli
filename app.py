@@ -1,3 +1,4 @@
+import streamlit as st
 import os
 if not os.path.exists("credentials.json") and "credentials" in st.secrets:
     with open("credentials.json", "w") as f:
