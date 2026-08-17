@@ -34,6 +34,13 @@ sayfa = st.sidebar.radio("Menü", [
     "Tüm Danışan Listesi"
 ])
 
+def format_durum(deger):
+    if deger in [True, "Yapıldı", "True", "true", "TRUE", 1, "1"]:
+        return "✅ Yapıldı"
+    elif deger in ["İptal", "Yapılmadı", "❌ İptal / Yapılmadı"]:
+        return "❌ Yapılmadı"
+    return "⏳ Bekliyor"
+
 # --- SAYFA 1: HAFTALIK GÖRÜŞME TAKVİMİ ---
 if sayfa == "Haftalık Görüşme Takvimi":
     st.subheader("🗓️ Bu Haftanın Görüşme Planı")
@@ -78,32 +85,35 @@ if sayfa == "Haftalık Görüşme Takvimi":
                     oto_uzman = atanan_fd
 
                 gorusme_tipi = row.get("Bu Haftaki Görüşme") or oto_gorusme
-                uzman = row.get("Bu Haftaki Uzman") or oto_uzman
-                durum = row.get("Görüşme Durumu") or "⏳ Bekliyor"
-                gecen_haftaki_uzman = row.get("Geçen Haftaki Uzman") or "-"
+                bu_hafta_uzman = row.get("Bu Haftaki Uzman") or oto_uzman
+                bu_hafta_durum = format_durum(row.get("Bu Hafta Durum") or row.get("Görüşme Durumu"))
+
+                gecen_hafta_uzman = row.get("Geçen Haftaki Uzman") or "-"
+                gecen_hafta_durum = format_durum(row.get("Geçen Hafta Durum"))
 
                 haftalik_liste.append({
                     "Danışan": row.get("Ad Soyad") or row.get("Ad_Soyad", "-"),
                     "Platform": platform_val,
                     "Hafta": f"{gecen_hafta}. Hafta (Döngü: {dongu_haftasi})",
                     "Görüşme Tipi": gorusme_tipi,
-                    "Bu Haftaki Uzman": uzman,
-                    "Geçen Haftaki Uzman": gecen_haftaki_uzman,
-                    "Durum": "✅ Yapıldı" if durum in [True, "Yapıldı", "True", "true"] else "⏳ Bekliyor",
+                    "Bu Haftaki Uzman": bu_hafta_uzman,
+                    "Bu Hafta": bu_hafta_durum,
+                    "Geçen Haftaki Uzman": gecen_hafta_uzman,
+                    "Geçen Hafta": gecen_hafta_durum,
                     "Kulüp/Mevki": f"{row.get('Kulup', row.get('Kulübü', ''))} / {row.get('Mevki', row.get('Mevkisi', ''))}",
                     "İletişim": row.get("Telefon") or row.get("İletişim", "-")
                 })
                 
             st.dataframe(pd.DataFrame(haftalik_liste), use_container_width=True)
-            st.caption("💡 Seansı onaylamak (yapıldı/yapılmadı) veya uzman değiştirmek için sol menüden **'Haftalık Planı Manuel Düzenle & Yoklama'** sekmesine geçin.")
+            st.caption("💡 Seans onaylarını (tikleri) güncellemek veya uzman değiştirmek için sol menüden **'Haftalık Planı Manuel Düzenle & Yoklama'** sekmesine geçin.")
         else:
             st.info("ℹ️ Tabloda kayıtlı danışan bulunmuyor.")
     except Exception as e:
         st.warning(f"Veriler okunurken bir hata oluştu: {e}")
 
-# --- SAYFA 2: MANUEL DÜZENLEME & YOKLAMA ---
+# --- SAYFA 2: MANUEL DÜZENLEME & ÇİFT YOKLAMA ---
 elif sayfa == "Haftalık Planı Manuel Düzenle & Yoklama":
-    st.subheader("✍️ Haftalık Plan Güncelleme ve Seans Takibi")
+    st.subheader("✍️ Haftalık Plan Güncelleme ve Yoklama (Geçen Hafta & Bu Hafta)")
     
     try:
         data = danisanlar_sheet.get_all_records()
@@ -116,30 +126,36 @@ elif sayfa == "Haftalık Planı Manuel Düzenle & Yoklama":
             secilen_satir = df[df["Ad Soyad"] == secilen_danisan].iloc[0] if "Ad Soyad" in df.columns else df[df["Ad_Soyad"] == secilen_danisan].iloc[0]
             satir_no = df[df["Ad Soyad"] == secilen_danisan].index[0] + 2
 
-            # Geçmiş ve mevcut bilgileri gösteren kartlar
-            mevcut_uzman = secilen_satir.get("Bu Haftaki Uzman") or secilen_satir.get("Atanan FD", "-")
-            mevcut_gorusme = secilen_satir.get("Bu Haftaki Görüşme") or "Felsefi Danışmanlık"
-            gecen_uzman = secilen_satir.get("Geçen Haftaki Uzman") or "-"
-            gecen_gorusme = secilen_satir.get("Geçen Haftaki Görüşme") or "-"
-            mevcut_durum = secilen_satir.get("Görüşme Durumu") in [True, "Yapıldı", "True", "true"]
+            mevcut_bu_uzman = secilen_satir.get("Bu Haftaki Uzman") or secilen_satir.get("Atanan FD", "-")
+            mevcut_bu_gorusme = secilen_satir.get("Bu Haftaki Görüşme") or "Felsefi Danışmanlık"
+            mevcut_bu_durum = secilen_satir.get("Bu Hafta Durum") in [True, "Yapıldı", "True", "true", "TRUE", 1, "1"]
+
+            mevcut_gecen_uzman = secilen_satir.get("Geçen Haftaki Uzman") or "-"
+            mevcut_gecen_gorusme = secilen_satir.get("Geçen Haftaki Görüşme") or "-"
+            mevcut_gecen_durum = secilen_satir.get("Geçen Hafta Durum") in [True, "Yapıldı", "True", "true", "TRUE", 1, "1"]
 
             st.markdown("---")
-            col_info1, col_info2, col_info3 = st.columns(3)
+            col_info1, col_info2, col_info3, col_info4 = st.columns(4)
             with col_info1:
-                st.metric("Geçen Haftaki Uzman", f"{gecen_uzman}")
+                st.metric("Geçen Haftaki Uzman", f"{mevcut_gecen_uzman}")
             with col_info2:
-                st.metric("Geçen Haftaki Görüşme", f"{gecen_gorusme}")
+                st.metric("Geçen Hafta Durumu", "✅ Yapıldı" if mevcut_gecen_durum else "⏳ Bekliyor")
             with col_info3:
-                st.metric("Son Durum", "✅ Yapıldı" if mevcut_durum else "⏳ Bekliyor")
+                st.metric("Bu Haftaki Uzman", f"{mevcut_bu_uzman}")
+            with col_info4:
+                st.metric("Bu Hafta Durumu", "✅ Yapıldı" if mevcut_bu_durum else "⏳ Bekliyor")
             st.markdown("---")
 
             with st.form("manuel_duzenleme_ve_yoklama_formu"):
-                st.markdown("#### 1. Seans Tamamlanma Durumu (Yoklama)")
-                yapildi_mi = st.checkbox("✅ Bu haftaki görüşme başarıyla yapıldı", value=mevcut_durum)
+                col_g, col_b = st.columns(2)
+                
+                with col_g:
+                    st.markdown("#### ⏮️ Geçen Haftanın Durumu")
+                    gecen_uzman_input = st.text_input("Geçen Haftaki Uzman", value=str(mevcut_gecen_uzman))
+                    gecen_yapildi_mi = st.checkbox("✅ Geçen haftaki görüşme yapıldı", value=mevcut_gecen_durum)
 
-                st.markdown("#### 2. Yeni Hafta / Bu Haftaki Atama")
-                c1, c2 = st.columns(2)
-                with c1:
+                with col_b:
+                    st.markdown("#### ⏭️ Bu Haftanın Durumu & Ataması")
                     gorusme_secenekleri = [
                         "Felsefi Danışmanlık",
                         "Psikolog Seansı",
@@ -150,33 +166,33 @@ elif sayfa == "Haftalık Planı Manuel Düzenle & Yoklama":
                         "Pas / Görüşme Yok",
                         "Özel Seans"
                     ]
-                    idx = gorusme_secenekleri.index(mevcut_gorusme) if mevcut_gorusme in gorusme_secenekleri else 0
-                    yeni_gorusme = st.selectbox("Görüşme Tipi", gorusme_secenekleri, index=idx)
-                
-                with c2:
-                    yeni_uzman = st.text_input("Sorumlu Uzman", value=str(mevcut_uzman))
+                    idx = gorusme_secenekleri.index(mevcut_bu_gorusme) if mevcut_bu_gorusme in gorusme_secenekleri else 0
+                    yeni_bu_gorusme = st.selectbox("Görüşme Tipi", gorusme_secenekleri, index=idx)
+                    bu_uzman_input = st.text_input("Bu Haftaki Uzman", value=str(mevcut_bu_uzman))
+                    bu_yapildi_mi = st.checkbox("✅ Bu haftaki görüşme yapıldı", value=mevcut_bu_durum)
 
-                kaydet = st.form_submit_button("Bilgileri Kaydet ve Güncelle")
+                st.markdown("---")
+                kaydet = st.form_submit_button("Bilgileri Kaydet ve Tabloyu Güncelle")
                 
                 if kaydet:
                     headers = danisanlar_sheet.row_values(1)
-                    gerekli_sutunlar = ["Bu Haftaki Görüşme", "Bu Haftaki Uzman", "Geçen Haftaki Görüşme", "Geçen Haftaki Uzman", "Görüşme Durumu"]
+                    gerekli_sutunlar = [
+                        "Bu Haftaki Görüşme", "Bu Haftaki Uzman", "Bu Hafta Durum",
+                        "Geçen Haftaki Görüşme", "Geçen Haftaki Uzman", "Geçen Hafta Durum"
+                    ]
                     
                     for sutun in gerekli_sutunlar:
                         if sutun not in headers:
                             danisanlar_sheet.update_cell(1, len(headers) + 1, sutun)
                             headers.append(sutun)
 
-                    # Eğer seans yapıldı işaretlendiyse veya yeni haftaya geçiliyorsa mevcut uzmanı geçen haftaya aktarır
-                    if yapildi_mi and not mevcut_durum:
-                        danisanlar_sheet.update_cell(satir_no, headers.index("Geçen Haftaki Görüşme") + 1, str(mevcut_gorusme))
-                        danisanlar_sheet.update_cell(satir_no, headers.index("Geçen Haftaki Uzman") + 1, str(mevcut_uzman))
-
-                    danisanlar_sheet.update_cell(satir_no, headers.index("Bu Haftaki Görüşme") + 1, str(yeni_gorusme))
-                    danisanlar_sheet.update_cell(satir_no, headers.index("Bu Haftaki Uzman") + 1, str(yeni_uzman))
-                    danisanlar_sheet.update_cell(satir_no, headers.index("Görüşme Durumu") + 1, "Yapıldı" if yapildi_mi else "Bekliyor")
+                    danisanlar_sheet.update_cell(satir_no, headers.index("Geçen Haftaki Uzman") + 1, str(gecen_uzman_input))
+                    danisanlar_sheet.update_cell(satir_no, headers.index("Geçen Hafta Durum") + 1, "Yapıldı" if gecen_yapildi_mi else "Bekliyor")
+                    danisanlar_sheet.update_cell(satir_no, headers.index("Bu Haftaki Görüşme") + 1, str(yeni_bu_gorusme))
+                    danisanlar_sheet.update_cell(satir_no, headers.index("Bu Haftaki Uzman") + 1, str(bu_uzman_input))
+                    danisanlar_sheet.update_cell(satir_no, headers.index("Bu Hafta Durum") + 1, "Yapıldı" if bu_yapildi_mi else "Bekliyor")
                     
-                    st.success(f"{secilen_danisan} için kayıt güncellendi! Durum: {'✅ Yapıldı' if yapildi_mi else '⏳ Bekliyor'}")
+                    st.success(f"{secilen_danisan} kaydı başarıyla güncellendi!")
                     st.cache_resource.clear()
         else:
             st.info("Kayıtlı danışan bulunamadı.")
