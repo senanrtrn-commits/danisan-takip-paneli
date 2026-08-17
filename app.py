@@ -1,8 +1,9 @@
 import streamlit as st
 import os
-if not os.path.exists("credentials.json") and "credentials" in st.secrets:
+
+if not os.path.exists("credentials.json") and "gcp_json" in st.secrets:
     with open("credentials.json", "w") as f:
-        f.write(st.secrets["credentials"])
+        f.write(st.secrets["gcp_json"])
         import streamlit as st
 import pandas as pd
 import gspread
