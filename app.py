@@ -12,8 +12,20 @@ st.title("⚽ Mod7 & Sporcu Gelişimi Platformu – Danışan Takip Paneli")
 def get_google_sheet():
     if "gcp_service_account" in st.secrets:
         creds_dict = dict(st.secrets["gcp_service_account"])
-        # Anahtardaki satır sonu karakterlerini düzeltir
-        creds_dict["private_key"] = creds_dict["private_key"].replace("\\n", "\n")
+        
+        # Anahtar formatını otomatik onarır (MalformedFraming hatasını önler)
+        raw_key = creds_dict.get("private_key", "")
+        clean_key = (
+            raw_key.replace("-----BEGIN PRIVATE KEY-----", "")
+            .replace("-----END PRIVATE KEY-----", "")
+            .replace("END PRIVATE KEY-----", "")
+            .replace("\\n", "")
+            .replace("\n", "")
+            .replace(" ", "")
+            .strip()
+        )
+        creds_dict["private_key"] = f"-----BEGIN PRIVATE KEY-----\n{clean_key}\n-----END PRIVATE KEY-----\n"
+        
         gc = gspread.service_account_from_dict(creds_dict)
     else:
         gc = gspread.service_account(filename="credentials.json")
