@@ -1,0 +1,6 @@
+[theme]
+primaryColor = "#FF7A00"             # Canlı Turuncu (Aktif butonlar, seçimler)
+backgroundColor = "#0B132B"          # Derin Gece Laciverti (Ana Arka Plan)
+secondaryBackgroundColor = "#1C2541" # Orta Ton Lacivert (Sol Menü, Formlar, Kartlar)
+textColor = "#FFFFFF"                # Beyaz (Okunabilir Yazı Rengi)
+font = "sans serif"
