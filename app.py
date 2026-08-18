@@ -2,16 +2,13 @@ import streamlit as st
 import pandas as pd
 import gspread
 import json
-from datetime import datetime, timedelta
-import pytz
-from google.oauth2 import service_account
-from googleapiclient.discovery import build
+from datetime import datetime, timedelta, timezone
 
 # 1. Sayfa Ayarları
 st.set_page_config(page_title="Mod7 & SG Danışan Takip & Randevu Sistemi", layout="wide")
 
-CALENDAR_ID = "df72b1757a4992324ec30b83ff62a2956242153f3a3f9ed65e48a56f8138b723@group.calendar.google.com"
-TIMEZONE = "Europe/Istanbul"
+# Türkiye Saat Dilimi (UTC+3)
+TR_TZ = timezone(timedelta(hours=3))
 
 GORUSME_SECENEKLERI = [
     "Felsefi Danışmanlık",
@@ -29,28 +26,20 @@ UZMAN_LISTESI = [
     "Sena", "Dilara", "Mehmet", "Salih", "Gülşah", "Busenaz", "Canan", "Beste", "Ebru", "Koray", "Burak"
 ]
 
-# 2. Google Servis Bağlantıları
+# 2. Google Sheets Bağlantısı
 @st.cache_resource
-def get_services():
-    scopes = [
-        "https://www.googleapis.com/auth/spreadsheets",
-        "https://www.googleapis.com/auth/drive",
-        "https://www.googleapis.com/auth/calendar"
-    ]
+def get_google_sheet():
     if "credentials_json" in st.secrets:
         creds_dict = json.loads(st.secrets["credentials_json"])
-        creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=scopes)
         gc = gspread.service_account_from_dict(creds_dict)
     else:
-        creds = service_account.Credentials.from_service_account_file("credentials.json", scopes=scopes)
         gc = gspread.service_account(filename="credentials.json")
     
-    cal_service = build("calendar", "v3", credentials=creds)
     sheet = gc.open("Danisan_Takip_Sistemi")
-    return sheet, cal_service
+    return sheet
 
 try:
-    sheet, calendar_service = get_services()
+    sheet = get_google_sheet()
     danisanlar_sheet = sheet.worksheet("Danisanlar")
     
     # Musaitlikler sayfası kontrolü
@@ -60,7 +49,7 @@ try:
         musaitlik_sheet = sheet.add_worksheet(title="Musaitlikler", rows="100", cols="10")
         musaitlik_sheet.append_row(["ID", "Uzman", "Tarih", "Saat", "Durum", "Alinan_Danisan"])
 except Exception as e:
-    st.error(f"Google Servis bağlantı hatası: {e}")
+    st.error(f"Google Sheets bağlantı hatası: {e}")
 
 # 3. Yardımcı Fonksiyonlar
 def format_durum(deger):
@@ -70,31 +59,11 @@ def format_durum(deger):
         return "❌ Yapılmadı"
     return "⏳ Bekliyor"
 
-def takvime_etkinlik_ekle(danisan, uzman, gorusme_tipi, tarih_str, saat_str, konum_tipi="online"):
-    try:
-        tz = pytz.timezone(TIMEZONE)
-        tarih_dt = datetime.strptime(tarih_str, "%Y-%m-%d").date()
-        saat_dt = datetime.strptime(saat_str, "%H:%M").time()
-        baslangic_dt = tz.localize(datetime.combine(tarih_dt, saat_dt))
-        bitis_dt = baslangic_dt + timedelta(hours=1)
-        
-        summary = f"{danisan} {uzman} {gorusme_tipi} {konum_tipi}".strip()
-        event_body = {
-            "summary": summary,
-            "description": f"Mod7 & SG Otomatik Randevu: {gorusme_tipi} - Uzman: {uzman}",
-            "start": {"dateTime": baslangic_dt.isoformat()},
-            "end": {"dateTime": bitis_dt.isoformat()},
-        }
-        calendar_service.events().insert(calendarId=CALENDAR_ID, body=event_body).execute()
-        return True, "Randevu takvime başarıyla eklendi."
-    except Exception as e:
-        return False, str(e)
-
-# 4. URL Parametresi Kontrolü (Sporcu Özel Arayüzü)
+# 4. URL Parametresi Kontrolü (Sporcu Özel Randevu Ekranı)
 params = st.query_params
 secilen_sporcu_param = params.get("danisan", None)
 
-# --- SPORCU GİRİŞ YAPTIĞINDA ÇIKACAK ÖZEL EKRAN ---
+# --- SPORCU LİNKE TIKLADIĞINDA ÇIKACAK ÖZEL EKRAN ---
 if secilen_sporcu_param:
     st.markdown(f"## 🏆 Sporcu Gelişimi & Mod7 – Randevu Seçim Ekranı")
     st.info(f"Hoş geldin **{secilen_sporcu_param}**, lütfen görüşme saatinizi seçiniz.")
@@ -103,7 +72,7 @@ if secilen_sporcu_param:
         data = danisanlar_sheet.get_all_records()
         df = pd.DataFrame(data)
         
-        danisan_row = df[df["Ad Soyad"].str.lower() == secilen_sporcu_param.lower()] if "Ad Soyad" in df.columns else df[df["Ad_Soyad"].str.lower() == secilen_sporcu_param.lower()]
+        danisan_row = df[df["Ad Soyad"].astype(str).str.lower() == secilen_sporcu_param.lower()] if "Ad Soyad" in df.columns else df[df["Ad_Soyad"].astype(str).str.lower() == secilen_sporcu_param.lower()]
         
         if not danisan_row.empty:
             row_data = danisan_row.iloc[0]
@@ -116,10 +85,9 @@ if secilen_sporcu_param:
             m_data = musaitlik_sheet.get_all_records()
             m_df = pd.DataFrame(m_data)
             
-            if not m_df.empty:
-                # Hocanın adını içeren ve boş (Musait) olan slotları filtrele
+            if not m_df.empty and "Uzman" in m_df.columns:
                 uygun_slotlar = m_df[
-                    (m_df["Uzman"].str.lower().str.contains(atanan_uzman.lower()[:3])) & 
+                    (m_df["Uzman"].astype(str).str.lower().str.contains(atanan_uzman.lower()[:3])) & 
                     (m_df["Durum"] == "Müsait")
                 ]
                 
@@ -130,28 +98,23 @@ if secilen_sporcu_param:
                     if st.button("Randevumu Onayla"):
                         secilen_tarih, secilen_saat = secilen_slot.split(" | ")
                         
-                        # Takvime yaz
-                        basarili, msg = takvime_etkinlik_ekle(secilen_sporcu_param, atanan_uzman, atanan_gorusme, secilen_tarih, secilen_saat)
+                        # Musaitlik slotunu kapat
+                        m_idx = uygun_slotlar[(uygun_slotlar["Tarih"] == secilen_tarih) & (uygun_slotlar["Saat"] == secilen_saat)].index[0] + 2
+                        m_headers = musaitlik_sheet.row_values(1)
+                        musaitlik_sheet.update_cell(m_idx, m_headers.index("Durum") + 1, "Dolu")
+                        musaitlik_sheet.update_cell(m_idx, m_headers.index("Alinan_Danisan") + 1, secilen_sporcu_param)
                         
-                        if basarili:
-                            # Musaitlik slotunu kapat
-                            m_idx = uygun_slotlar[(uygun_slotlar["Tarih"] == secilen_tarih) & (uygun_slotlar["Saat"] == secilen_saat)].index[0] + 2
-                            m_headers = musaitlik_sheet.row_values(1)
-                            musaitlik_sheet.update_cell(m_idx, m_headers.index("Durum") + 1, "Dolu")
-                            musaitlik_sheet.update_cell(m_idx, m_headers.index("Alinan_Danisan") + 1, secilen_sporcu_param)
-                            
-                            # Danışanın durumunu güncelle
-                            d_satir_no = danisan_row.index[0] + 2
-                            d_headers = danisanlar_sheet.row_values(1)
+                        # Danışanın durumunu güncelle
+                        d_satir_no = danisan_row.index[0] + 2
+                        d_headers = danisanlar_sheet.row_values(1)
+                        if "Bu Hafta Durum" in d_headers:
                             danisanlar_sheet.update_cell(d_satir_no, d_headers.index("Bu Hafta Durum") + 1, "Yapıldı")
-                            
-                            st.success(f"🎉 Randevunuz başarıyla oluşturuldu! {secilen_tarih} saat {secilen_saat} için randevunuz takvime kaydedildi.")
-                            st.balloons()
-                            st.cache_resource.clear()
-                        else:
-                            st.error(f"Randevu oluşturulamadı: {msg}")
+                        
+                        st.success(f"🎉 Randevunuz başarıyla oluşturuldu! {secilen_tarih} saat {secilen_saat} için randevunuz kaydedildi.")
+                        st.balloons()
+                        st.cache_resource.clear()
                 else:
-                    st.warning(f"{atanan_uzman} için şu anda açık müsait saat bulunmamaktadır. Lütfen koordinatör ile iletişime geçiniz.")
+                    st.warning(f"{atanan_uzman} için şu anda açık müsait saat bulunmamaktadır. Lütfen koordinatörünüz ile iletişime geçiniz.")
             else:
                 st.warning("Sistemde henüz girilmiş bir müsaitlik bulunmuyor.")
         else:
@@ -168,7 +131,6 @@ sayfa = st.sidebar.radio("Menü", [
     "🗓️ Hoca Müsaitlik Girişi",
     "🔗 Sporcu Randevu Linkleri",
     "Haftalık Planı Manuel Düzenle & Yoklama", 
-    "Takvime Yeni Seans Planla",
     "Yeni Danışan Ekle", 
     "Tüm Danışan Listesi"
 ])
@@ -177,83 +139,22 @@ sayfa = st.sidebar.radio("Menü", [
 if sayfa == "Haftalık Görüşme Takvimi":
     st.subheader("🗓️ Bu Haftanın Görüşme Planı")
     
-    col_sync, col_space = st.columns([2, 5])
-    with col_sync:
-        if st.button("🔄 Google Takvimden Yoklamaları Çek & Eşle"):
-            with st.spinner("Takvim etkinlikleri taranıyor..."):
-                try:
-                    data = danisanlar_sheet.get_all_records()
-                    df = pd.DataFrame(data)
-                    headers = danisanlar_sheet.row_values(1)
-                    
-                    gerekli_sutunlar = [
-                        "Bu Haftaki Görüşme", "Bu Haftaki Uzman", "Bu Hafta Durum",
-                        "Geçen Haftaki Görüşme", "Geçen Haftaki Uzman", "Geçen Hafta Durum"
-                    ]
-                    for sutun in gerekli_sutunlar:
-                        if sutun not in headers:
-                            danisanlar_sheet.update_cell(1, len(headers) + 1, sutun)
-                            headers.append(sutun)
-
-                    tz = pytz.timezone(TIMEZONE)
-                    simdi = datetime.now(tz)
-                    zaman_min = (simdi - timedelta(days=21)).isoformat()
-                    zaman_max = (simdi + timedelta(days=7)).isoformat()
-                    
-                    events_result = calendar_service.events().list(
-                        calendarId=CALENDAR_ID,
-                        timeMin=zaman_min,
-                        timeMax=zaman_max,
-                        singleEvents=True,
-                        orderBy="startTime"
-                    ).execute()
-                    events = events_result.get("items", [])
-
-                    guncellenen_sayisi = 0
-                    for idx, row in df.iterrows():
-                        satir_no = idx + 2
-                        ad = str(row.get("Ad Soyad", row.get("Ad_Soyad", ""))).strip().lower()
-                        if not ad:
-                            continue
-                        ad_parcalari = ad.split()
-                        
-                        for ev in events:
-                            summary = ev.get("summary", "")
-                            summary_lower = summary.lower()
-                            
-                            if any(p in summary_lower for p in ad_parcalari) and "❌" not in summary:
-                                start_iso = ev["start"].get("dateTime", ev["start"].get("date"))
-                                event_dt = datetime.fromisoformat(start_iso.replace("Z", "+00:00")).astimezone(tz)
-                                fark_gun = (simdi.date() - event_dt.date()).days
-                                
-                                if 0 <= fark_gun <= 7:
-                                    danisanlar_sheet.update_cell(satir_no, headers.index("Bu Hafta Durum") + 1, "Yapıldı")
-                                    guncellenen_sayisi += 1
-                                elif 7 < fark_gun <= 14:
-                                    danisanlar_sheet.update_cell(satir_no, headers.index("Geçen Hafta Durum") + 1, "Yapıldı")
-                                    guncellenen_sayisi += 1
-                    
-                    st.success(f"Senkronizasyon tamamlandı! Toplam {guncellenen_sayisi} seans güncellendi.")
-                    st.cache_resource.clear()
-                except Exception as e:
-                    st.error(f"Senkronizasyon hatası: {e}")
-
     try:
         data = danisanlar_sheet.get_all_records()
         df = pd.DataFrame(data)
         
         if not df.empty:
-            bugun = datetime.now()
+            bugun = datetime.now(TR_TZ)
             haftalik_liste = []
             
             for index, row in df.iterrows():
                 tarih_val = row.get("Baslangic Tarihi") or row.get("Başlangıç Tarihi") or row.get("Baslangic_Tarihi") or str(bugun.date())
                 try:
-                    baslangic = datetime.strptime(str(tarih_val).strip(), "%Y-%m-%d")
+                    baslangic = datetime.strptime(str(tarih_val).strip(), "%Y-%m-%d").replace(tzinfo=TR_TZ)
                 except Exception:
                     baslangic = bugun
 
-                gecen_hafta = max(1, ((bugun - baslangic).days // 7) + 1)
+                gecen_hafta = max(1, ((bugun.date() - baslangic.date()).days // 7) + 1)
                 dongu_haftasi = gecen_hafta % 4
                 if dongu_haftasi == 0:
                     dongu_haftasi = 4
@@ -299,6 +200,7 @@ if sayfa == "Haftalık Görüşme Takvimi":
                 })
                 
             st.dataframe(pd.DataFrame(haftalik_liste), use_container_width=True)
+            st.caption("💡 Seans onaylarını (tikleri) güncellemek veya uzman/seans tipi değiştirmek için sol menüden **'Haftalık Planı Manuel Düzenle & Yoklama'** sekmesine geçin.")
         else:
             st.info("Tabloda kayıtlı danışan bulunmuyor.")
     except Exception as e:
@@ -313,7 +215,7 @@ elif sayfa == "🗓️ Hoca Müsaitlik Girişi":
     with col_m1:
         with st.form("musaitlik_ekle_formu"):
             secilen_hoca = st.selectbox("Uzman Seçin", UZMAN_LISTESI)
-            m_tarih = st.date_input("Müsait Olduğunuz Tarih", datetime.now() + timedelta(days=1))
+            m_tarih = st.date_input("Müsait Olduğunuz Tarih", datetime.now().date() + timedelta(days=1))
             m_saat = st.time_input("Müsait Başlangıç Saati", datetime.strptime("14:00", "%H:%M").time())
             
             m_kaydet = st.form_submit_button("Müsaitlik Slotunu Ekle")
@@ -336,7 +238,7 @@ elif sayfa == "🗓️ Hoca Müsaitlik Girişi":
                     st.error(f"Slot eklenirken hata oluştu: {e}")
 
     with col_m2:
-        st.markdown("#### Mevcut Açık Müsaitlikler")
+        st.markdown("#### Mevcut Müsaitlik Listesi")
         try:
             m_data = musaitlik_sheet.get_all_records()
             if m_data:
@@ -349,7 +251,7 @@ elif sayfa == "🗓️ Hoca Müsaitlik Girişi":
 # --- MENÜ 3: SPORCUYA ÖZEL RANDEVU LİNKLERİ ---
 elif sayfa == "🔗 Sporcu Randevu Linkleri":
     st.subheader("🔗 Sporculara Gönderilecek Kişisel Randevu Linkleri")
-    st.caption("Aşağıdaki bağlantıları sporculara WhatsApp veya mesaj ile ilettiğinizde, sporcular doğrudan kendi randevu ekranlarını açacaktır.")
+    st.caption("Aşağıdaki bağlantıları sporculara ilettiğinizde, sporcu doğrudan kendi hocasının müsaitlik saatlerinden seçim yapabilir.")
     
     try:
         data = danisanlar_sheet.get_all_records()
@@ -459,56 +361,7 @@ elif sayfa == "Haftalık Planı Manuel Düzenle & Yoklama":
     except Exception as e:
         st.error(f"Hata: {e}")
 
-# --- MENÜ 5: TAKVİME YENİ SEANS PLANLA ---
-elif sayfa == "Takvime Yeni Seans Planla":
-    st.subheader("📅 Google Takvim'e Doğrudan Seans Ekle")
-    
-    try:
-        data = danisanlar_sheet.get_all_records()
-        df = pd.DataFrame(data)
-        
-        if not df.empty:
-            danisan_adlari = df["Ad Soyad"].tolist() if "Ad Soyad" in df.columns else df["Ad_Soyad"].tolist()
-            
-            with st.form("takvime_etkinlik_ekle_formu"):
-                c1, c2 = st.columns(2)
-                with c1:
-                    secilen_danisan = st.selectbox("Danışan", danisan_adlari)
-                    gorusme_turu = st.selectbox("Görüşme Türü", GORUSME_SECENEKLERI)
-                    uzman_adi = st.text_input("Görüşmeyi Yapacak Uzman", value="Sena")
-                
-                with c2:
-                    seans_tarihi = st.date_input("Görüşme Tarihi", datetime.now())
-                    seans_saati = st.time_input("Görüşme Saati", datetime.strptime("14:00", "%H:%M").time())
-                    konum = st.selectbox("Görüşme Şekli", ["online", "ofis", "Lotus", "ziyaret"])
-
-                takvim_buton = st.form_submit_button("🗓️ Google Takvime Ekle & Panele Kaydet")
-                
-                if takvim_buton:
-                    basarili, mesaj = takvime_etkinlik_ekle(
-                        secilen_danisan, uzman_adi, gorusme_turu, 
-                        seans_tarihi.strftime("%Y-%m-%d"), 
-                        seans_saati.strftime("%H:%M"), 
-                        konum
-                    )
-                    if basarili:
-                        satir_no = df[df["Ad Soyad"] == secilen_danisan].index[0] + 2 if "Ad Soyad" in df.columns else df[df["Ad_Soyad"] == secilen_danisan].index[0] + 2
-                        headers = danisanlar_sheet.row_values(1)
-                        if "Bu Haftaki Görüşme" in headers:
-                            danisanlar_sheet.update_cell(satir_no, headers.index("Bu Haftaki Görüşme") + 1, str(gorusme_turu))
-                        if "Bu Haftaki Uzman" in headers:
-                            danisanlar_sheet.update_cell(satir_no, headers.index("Bu Haftaki Uzman") + 1, str(uzman_adi))
-                        
-                        st.success(f"{secilen_danisan} için randevu Google Takvim'e eklendi ve panel güncellendi!")
-                        st.cache_resource.clear()
-                    else:
-                        st.error(f"Takvime eklenirken hata oluştu: {mesaj}")
-        else:
-            st.info("Kayıtlı danışan bulunamadı.")
-    except Exception as e:
-        st.error(f"Hata: {e}")
-
-# --- MENÜ 6: YENİ DANIŞAN EKLE ---
+# --- MENÜ 5: YENİ DANIŞAN EKLE ---
 elif sayfa == "Yeni Danışan Ekle":
     st.subheader("➕ Yeni Danışan Kaydı")
     
@@ -527,7 +380,7 @@ elif sayfa == "Yeni Danışan Ekle":
             atanan_psk = st.text_input("Atanan Psikolog")
             telefon = st.text_input("İletişim / Telefon")
             gorsel = st.selectbox("Maç Görseli Hazırlanacak mı?", ["Hayır", "Evet"])
-            baslangic_tarihi = st.date_input("Süreç Başlangıç Tarihi", datetime.now())
+            baslangic_tarihi = st.date_input("Süreç Başlangıç Tarihi", datetime.now().date())
         
         submit = st.form_submit_button("Danışanı Kaydet")
         
@@ -546,7 +399,7 @@ elif sayfa == "Yeni Danışan Ekle":
             except Exception as e:
                 st.error(f"Kayıt eklenirken bir hata oluştu: {e}")
 
-# --- MENÜ 7: TÜM DANIŞAN LİSTESİ ---
+# --- MENÜ 6: TÜM DANIŞAN LİSTESİ ---
 elif sayfa == "Tüm Danışan Listesi":
     st.subheader("📋 Sistemdeki Tüm Danışanlar")
     try:
