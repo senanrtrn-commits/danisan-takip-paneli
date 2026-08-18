@@ -431,8 +431,13 @@ elif sayfa == "🗓️ Hoca Müsaitlik Girişi":
             m_data = musaitlik_sheet.get_all_records()
             if m_data:
                 gosterim_df = pd.DataFrame(m_data)
-                if "Tarih" in gosterim_df.columns:
-                    gosterim_df["Tarih (Gün)"] = gosterim_df["Tarih"].apply(tarih_gun_formatla)
+                
+                # Tablodaki Tarih sütununu formatla
+                t_cols = [c for c in gosterim_df.columns if "Tarih" in c]
+                if t_cols:
+                    t_col = t_cols[0]
+                    gosterim_df[t_col] = gosterim_df[t_col].apply(tarih_gun_formatla)
+                
                 st.dataframe(gosterim_df, use_container_width=True)
             else:
                 st.info("Kayıtlı müsaitlik bulunmuyor.")
