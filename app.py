@@ -4,12 +4,14 @@ import gspread
 import json
 import re
 from datetime import datetime, timedelta, timezone
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
 
 # 1. Sayfa Ayarları
 st.set_page_config(page_title="Mod7 & SG Danışan Takip & Randevu Sistemi", layout="wide")
 
-# Türkiye Saat Dilimi (UTC+3)
 TR_TZ = timezone(timedelta(hours=3))
+CALENDAR_ID = "df72b1757a4992324ec30b83ff62a2956242153f3a3f9ed65e48a56f8138b723@group.calendar.google.com"
 
 GORUSME_SECENEKLERI = [
     "Felsefi Danışmanlık",
@@ -27,20 +29,28 @@ UZMAN_LISTESI = [
     "Sena", "Dilara", "Mehmet", "Salih", "Gülşah", "Busenaz", "Canan", "Beste", "Ebru", "Koray", "Burak"
 ]
 
-# 2. Google Sheets Bağlantısı
+# 2. Google Servis Bağlantıları
 @st.cache_resource
-def get_google_sheet():
+def get_services():
+    scopes = [
+        "https://www.googleapis.com/auth/spreadsheets",
+        "https://www.googleapis.com/auth/drive",
+        "https://www.googleapis.com/auth/calendar"
+    ]
     if "credentials_json" in st.secrets:
         creds_dict = json.loads(st.secrets["credentials_json"])
+        creds = service_account.Credentials.from_service_account_info(creds_dict, scopes=scopes)
         gc = gspread.service_account_from_dict(creds_dict)
     else:
+        creds = service_account.Credentials.from_service_account_file("credentials.json", scopes=scopes)
         gc = gspread.service_account(filename="credentials.json")
     
+    cal_service = build("calendar", "v3", credentials=creds)
     sheet = gc.open("Danisan_Takip_Sistemi")
-    return sheet
+    return sheet, cal_service
 
 try:
-    sheet = get_google_sheet()
+    sheet, calendar_service = get_services()
     danisanlar_sheet = sheet.worksheet("Danisanlar")
     
     try:
@@ -49,7 +59,7 @@ try:
         musaitlik_sheet = sheet.add_worksheet(title="Musaitlikler", rows="100", cols="10")
         musaitlik_sheet.append_row(["ID", "Uzman", "Tarih", "Saat", "Durum", "Alinan_Danisan"])
 except Exception as e:
-    st.error(f"Google Sheets bağlantı hatası: {e}")
+    st.error(f"Google bağlantı hatası: {e}")
 
 # 3. Yardımcı Fonksiyonlar
 def format_durum(deger):
@@ -66,7 +76,6 @@ def isim_temizle(isim):
     return isim_str.strip()
 
 def sutun_temizle(df):
-    """Sütun başlıklarındaki virgül, nokta ve boşlukları temizler."""
     yeni_kolonlar = []
     for c in df.columns:
         temiz = re.sub(r'[^a-zA-Z0-9_ğüşıöçĞÜŞİÖÇ]', '', str(c)).strip()
@@ -74,11 +83,31 @@ def sutun_temizle(df):
     df.columns = yeni_kolonlar
     return df
 
+def takvime_etkinlik_yaz(danisan, uzman, gorusme_tipi, tarih_str, saat_str, konum="online"):
+    try:
+        tarih_dt = datetime.strptime(tarih_str.strip(), "%Y-%m-%d").date()
+        saat_dt = datetime.strptime(saat_str.strip(), "%H:%M").time()
+        
+        baslangic_dt = datetime.combine(tarih_dt, saat_dt, tzinfo=TR_TZ)
+        bitis_dt = baslangic_dt + timedelta(hours=1)
+        
+        summary = f"{danisan} {uzman} {gorusme_tipi} {konum}".strip()
+        event_body = {
+            "summary": summary,
+            "description": f"Mod7 & SG Otomatik Randevu: {gorusme_tipi} | Uzman: {uzman}",
+            "start": {"dateTime": baslangic_dt.isoformat()},
+            "end": {"dateTime": bitis_dt.isoformat()},
+        }
+        calendar_service.events().insert(calendarId=CALENDAR_ID, body=event_body).execute()
+        return True, "Randevu Google Takvim'e başarıyla eklendi."
+    except Exception as e:
+        return False, str(e)
+
 # 4. URL Parametresi Kontrolü (Sporcu Özel Randevu Ekranı)
 params = st.query_params
 secilen_sporcu_param = params.get("danisan", None)
 
-# --- SPORCU LİNKE TIKLADIĞINDA ÇIKACAK ÖZEL EKRAN ---
+# --- SPORCU ÖZEL EKRANI ---
 if secilen_sporcu_param:
     st.markdown(f"## 🏆 Sporcu Gelişimi & Mod7 – Randevu Seçim Ekranı")
     st.info(f"Hoş geldin **{secilen_sporcu_param}**, lütfen görüşme saatinizi seçiniz.")
@@ -123,13 +152,15 @@ if secilen_sporcu_param:
                     if st.button("Randevumu Onayla"):
                         secilen_tarih, secilen_saat = secilen_slot.split(" | ")
                         
-                        m_headers = [re.sub(r'[^a-zA-Z0-9_]', '', str(h)).strip().title() for h in musaitlik_sheet.row_values(1)]
+                        # 1. Google Takvim'e otomatik etkinlik ekleme
+                        cal_ok, cal_msg = takvime_etkinlik_yaz(secilen_sporcu_param, atanan_uzman, atanan_gorusme, secilen_tarih, secilen_saat)
                         
+                        # 2. Google E-Tablo'da slotu kapatma
+                        m_headers = [re.sub(r'[^a-zA-Z0-9_]', '', str(h)).strip().title() for h in musaitlik_sheet.row_values(1)]
                         matched_row = uygun_slotlar[
                             (uygun_slotlar[tarih_col].astype(str).str.strip() == secilen_tarih.strip()) & 
                             (uygun_slotlar[saat_col].astype(str).str.strip() == secilen_saat.strip())
                         ]
-                        
                         m_idx = matched_row.index[0] + 2
                         durum_col_idx = m_headers.index("Durum") + 1 if "Durum" in m_headers else 5
                         danisan_col_idx = m_headers.index("Alinandanisan") + 1 if "Alinandanisan" in m_headers else 6
@@ -137,12 +168,13 @@ if secilen_sporcu_param:
                         musaitlik_sheet.update_cell(m_idx, durum_col_idx, "Dolu")
                         musaitlik_sheet.update_cell(m_idx, danisan_col_idx, secilen_sporcu_param)
                         
+                        # 3. Danışan tablosundaki durumu güncelleme
                         d_satir_no = danisan_row.index[0] + 2
                         d_headers = danisanlar_sheet.row_values(1)
                         if "Bu Hafta Durum" in d_headers:
                             danisanlar_sheet.update_cell(d_satir_no, d_headers.index("Bu Hafta Durum") + 1, "Yapıldı")
                         
-                        st.success(f"🎉 Randevunuz başarıyla oluşturuldu! {secilen_tarih} saat {secilen_saat} için randevunuz kaydedildi.")
+                        st.success(f"🎉 Randevunuz oluşturuldu ve Google Takvim'e işlendi! ({secilen_tarih} - Saat {secilen_saat})")
                         st.balloons()
                         st.cache_resource.clear()
                 else:
@@ -150,7 +182,7 @@ if secilen_sporcu_param:
             else:
                 st.warning("Sistemde henüz girilmiş bir müsaitlik bulunmuyor.")
         else:
-            st.error("Danışan kaydınız bulunamadı. Lütfen size iletilen bağlantıyı kontrol ediniz.")
+            st.error("Danışan kaydınız bulunamadı. Lütfen bağlantınızı kontrol ediniz.")
     except Exception as e:
         st.error(f"Hata oluştu: {e}")
     st.stop()
