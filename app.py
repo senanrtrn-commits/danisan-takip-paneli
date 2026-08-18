@@ -78,7 +78,6 @@ if secilen_sporcu_param:
         data = danisanlar_sheet.get_all_records()
         df = pd.DataFrame(data)
         
-        # Danışan adını esnek bulma
         df_cols = {c.strip(): c for c in df.columns}
         ad_col = df_cols.get("Ad Soyad", df_cols.get("Ad_Soyad", list(df.columns)[1]))
         
@@ -91,17 +90,13 @@ if secilen_sporcu_param:
             
             st.markdown(f"**Görüşeceğiniz Uzman:** `{atanan_uzman}` | **Seans Türü:** `{atanan_gorusme}`")
             
-            # Musaitlikler sayfasını oku
             m_data = musaitlik_sheet.get_all_records()
             m_df = pd.DataFrame(m_data)
             
             if not m_df.empty:
-                # Sütun başlıklarını normalize et
                 m_df.columns = [str(c).strip().title() for c in m_df.columns]
-                
                 uzman_kok = isim_temizle(atanan_uzman)
                 
-                # Eşleşen ve durumu 'Müsait' olan slotları filtrele
                 uygun_slotlar = m_df[
                     (m_df["Uzman"].astype(str).apply(isim_temizle).str.contains(uzman_kok)) & 
                     (m_df["Durum"].astype(str).str.strip().str.lower() == "müsait")
@@ -114,9 +109,7 @@ if secilen_sporcu_param:
                     if st.button("Randevumu Onayla"):
                         secilen_tarih, secilen_saat = secilen_slot.split(" | ")
                         
-                        # Musaitlik slotunu Dolu yap
                         m_headers = [str(h).strip().title() for h in musaitlik_sheet.row_values(1)]
-                        orj_headers = musaitlik_sheet.row_values(1)
                         
                         matched_row = uygun_slotlar[
                             (uygun_slotlar["Tarih"].astype(str).str.strip() == secilen_tarih.strip()) & 
@@ -130,7 +123,6 @@ if secilen_sporcu_param:
                         musaitlik_sheet.update_cell(m_idx, durum_col_idx, "Dolu")
                         musaitlik_sheet.update_cell(m_idx, danisan_col_idx, secilen_sporcu_param)
                         
-                        # Danışanlar sayfasında bu haftalık durumu 'Yapıldı' yap
                         d_satir_no = danisan_row.index[0] + 2
                         d_headers = danisanlar_sheet.row_values(1)
                         if "Bu Hafta Durum" in d_headers:
@@ -226,19 +218,19 @@ if sayfa == "Haftalık Görüşme Takvimi":
                 })
                 
             st.dataframe(pd.DataFrame(haftalik_liste), use_container_width=True)
-            st.caption("💡 Seans onaylarını (tikleri) güncellemek veya uzman/seans tipi değiştirmek için sol menüden **'Haftalık Planı Manuel Düzenle & Yoklama'** sekmesine geçin.")
+            st.caption("💡 Seans onaylarını güncellemek veya uzman/seans tipi değiştirmek için **'Haftalık Planı Manuel Düzenle & Yoklama'** sekmesine geçin.")
         else:
             st.info("Tabloda kayıtlı danışan bulunmuyor.")
     except Exception as e:
         st.warning(f"Veriler okunurken bir hata oluştu: {e}")
 
-# --- MENÜ 2: HOCA MÜSAİTLİK GİRİŞİ ---
+# --- MENÜ 2: HOCA MÜSAİTLİK GİRİŞİ & YÖNETİMİ ---
 elif sayfa == "🗓️ Hoca Müsaitlik Girişi":
-    st.subheader("🗓️ Uzman Müsaitlik Saatleri Tanımlama")
-    st.markdown("Hocalar bu alandan uygun oldukları tarih ve saat aralıklarını ekleyebilir.")
+    st.subheader("🗓️ Uzman Müsaitlik Saatleri Tanımlama & Yönetimi")
     
     col_m1, col_m2 = st.columns(2)
     with col_m1:
+        st.markdown("#### ➕ Yeni Müsaitlik Ekle")
         with st.form("musaitlik_ekle_formu"):
             secilen_hoca = st.selectbox("Uzman Seçin", UZMAN_LISTESI)
             m_tarih = st.date_input("Müsait Olduğunuz Tarih", datetime.now().date() + timedelta(days=1))
@@ -264,7 +256,7 @@ elif sayfa == "🗓️ Hoca Müsaitlik Girişi":
                     st.error(f"Slot eklenirken hata oluştu: {e}")
 
     with col_m2:
-        st.markdown("#### Mevcut Müsaitlik Listesi")
+        st.markdown("#### 📋 Mevcut Müsaitlik Listesi")
         try:
             m_data = musaitlik_sheet.get_all_records()
             if m_data:
@@ -273,6 +265,53 @@ elif sayfa == "🗓️ Hoca Müsaitlik Girişi":
                 st.info("Kayıtlı müsaitlik bulunmuyor.")
         except Exception as e:
             st.error(f"Veriler listelenirken hata: {e}")
+
+    st.markdown("---")
+    st.markdown("#### ⚙️ Müsaitlik Durumunu Manuel Güncelle veya Sil")
+    
+    try:
+        m_data = musaitlik_sheet.get_all_records()
+        m_df = pd.DataFrame(m_data)
+        
+        if not m_df.empty:
+            m_df.columns = [str(c).strip().title() for c in m_df.columns]
+            
+            slot_etiketleri = [
+                f"ID: {r['Id']} | {r['Uzman']} | {r['Tarih']} {r['Saat']} | Durum: {r['Durum']} | Danışan: {r.get('Alinan_Danisan', '-')}"
+                for _, r in m_df.iterrows()
+            ]
+            secilen_yonetim_slot = st.selectbox("İşlem Yapmak İstediğiniz Slotu Seçin", slot_etiketleri)
+            secilen_slot_id = int(secilen_yonetim_slot.split("|")[0].replace("ID:", "").strip())
+            
+            # Satır numarasını bul (başlık + 1)
+            slot_satir_no = m_df[m_df["Id"] == secilen_slot_id].index[0] + 2
+            m_headers = [str(h).strip().title() for h in musaitlik_sheet.row_values(1)]
+            durum_col_idx = m_headers.index("Durum") + 1 if "Durum" in m_headers else 5
+            danisan_col_idx = m_headers.index("Alinan_Danisan") + 1 if "Alinan_Danisan" in m_headers else 6
+
+            c_btn1, c_btn2, c_btn3 = st.columns(3)
+            with c_btn1:
+                if st.button("🔴 'Dolu' Olarak İşaretle"):
+                    musaitlik_sheet.update_cell(slot_satir_no, durum_col_idx, "Dolu")
+                    st.success("Slot 'Dolu' olarak güncellendi.")
+                    st.cache_resource.clear()
+            
+            with c_btn2:
+                if st.button("🟢 'Müsait' (Boş) Yap"):
+                    musaitlik_sheet.update_cell(slot_satir_no, durum_col_idx, "Müsait")
+                    musaitlik_sheet.update_cell(slot_satir_no, danisan_col_idx, "-")
+                    st.success("Slot tekrar 'Müsait' yapıldı.")
+                    st.cache_resource.clear()
+            
+            with c_btn3:
+                if st.button("🗑️ Bu Slotu Tamamen Sil"):
+                    musaitlik_sheet.delete_rows(slot_satir_no)
+                    st.warning("Müsaitlik slotu tablodan silindi.")
+                    st.cache_resource.clear()
+        else:
+            st.info("İşlem yapılacak müsaitlik kaydı bulunmuyor.")
+    except Exception as e:
+        st.error(f"Yönetim işlemi sırasında hata: {e}")
 
 # --- MENÜ 3: SPORCUYA ÖZEL RANDEVU LİNKLERİ ---
 elif sayfa == "🔗 Sporcu Randevu Linkleri":
