@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import gspread
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 # 1. Sayfa Ayarları
@@ -59,11 +60,19 @@ def format_durum(deger):
     return "⏳ Bekliyor"
 
 def isim_temizle(isim):
-    """'Sena Hoca', 'Psk. Sena' gibi unvanları temizler, kök ismi bulur."""
     isim_str = str(isim).lower()
     for unvan in ["hoca", "hocası", "psk", "psk.", "uzm", "uzm.", "dr", "dr."]:
         isim_str = isim_str.replace(unvan, "")
     return isim_str.strip()
+
+def sutun_temizle(df):
+    """Sütun başlıklarındaki virgül, nokta ve boşlukları temizler."""
+    yeni_kolonlar = []
+    for c in df.columns:
+        temiz = re.sub(r'[^a-zA-Z0-9_ğüşıöçĞÜŞİÖÇ]', '', str(c)).strip()
+        yeni_kolonlar.append(temiz.title())
+    df.columns = yeni_kolonlar
+    return df
 
 # 4. URL Parametresi Kontrolü (Sporcu Özel Randevu Ekranı)
 params = st.query_params
@@ -94,31 +103,36 @@ if secilen_sporcu_param:
             m_df = pd.DataFrame(m_data)
             
             if not m_df.empty:
-                m_df.columns = [str(c).strip().title() for c in m_df.columns]
+                m_df = sutun_temizle(m_df)
                 uzman_kok = isim_temizle(atanan_uzman)
                 
+                tarih_col = [c for c in m_df.columns if "Tarih" in c][0] if any("Tarih" in c for c in m_df.columns) else "Tarih"
+                saat_col = [c for c in m_df.columns if "Saat" in c][0] if any("Saat" in c for c in m_df.columns) else "Saat"
+                durum_col = [c for c in m_df.columns if "Durum" in c][0] if any("Durum" in c for c in m_df.columns) else "Durum"
+                uzman_col = [c for c in m_df.columns if "Uzman" in c][0] if any("Uzman" in c for c in m_df.columns) else "Uzman"
+
                 uygun_slotlar = m_df[
-                    (m_df["Uzman"].astype(str).apply(isim_temizle).str.contains(uzman_kok)) & 
-                    (m_df["Durum"].astype(str).str.strip().str.lower() == "müsait")
+                    (m_df[uzman_col].astype(str).apply(isim_temizle).str.contains(uzman_kok)) & 
+                    (m_df[durum_col].astype(str).str.strip().str.lower() == "müsait")
                 ]
                 
                 if not uygun_slotlar.empty:
-                    slot_secenekleri = [f"{str(r['Tarih']).strip()} | {str(r['Saat']).strip()}" for _, r in uygun_slotlar.iterrows()]
+                    slot_secenekleri = [f"{str(r[tarih_col]).strip()} | {str(r[saat_col]).strip()}" for _, r in uygun_slotlar.iterrows()]
                     secilen_slot = st.selectbox("Size Uygun Randevu Saatini Seçin", slot_secenekleri)
                     
                     if st.button("Randevumu Onayla"):
                         secilen_tarih, secilen_saat = secilen_slot.split(" | ")
                         
-                        m_headers = [str(h).strip().title() for h in musaitlik_sheet.row_values(1)]
+                        m_headers = [re.sub(r'[^a-zA-Z0-9_]', '', str(h)).strip().title() for h in musaitlik_sheet.row_values(1)]
                         
                         matched_row = uygun_slotlar[
-                            (uygun_slotlar["Tarih"].astype(str).str.strip() == secilen_tarih.strip()) & 
-                            (uygun_slotlar["Saat"].astype(str).str.strip() == secilen_saat.strip())
+                            (uygun_slotlar[tarih_col].astype(str).str.strip() == secilen_tarih.strip()) & 
+                            (uygun_slotlar[saat_col].astype(str).str.strip() == secilen_saat.strip())
                         ]
                         
                         m_idx = matched_row.index[0] + 2
                         durum_col_idx = m_headers.index("Durum") + 1 if "Durum" in m_headers else 5
-                        danisan_col_idx = m_headers.index("Alinan_Danisan") + 1 if "Alinan_Danisan" in m_headers else 6
+                        danisan_col_idx = m_headers.index("Alinandanisan") + 1 if "Alinandanisan" in m_headers else 6
                         
                         musaitlik_sheet.update_cell(m_idx, durum_col_idx, "Dolu")
                         musaitlik_sheet.update_cell(m_idx, danisan_col_idx, secilen_sporcu_param)
@@ -274,20 +288,27 @@ elif sayfa == "🗓️ Hoca Müsaitlik Girişi":
         m_df = pd.DataFrame(m_data)
         
         if not m_df.empty:
-            m_df.columns = [str(c).strip().title() for c in m_df.columns]
+            m_df = sutun_temizle(m_df)
+            
+            id_col = [c for c in m_df.columns if "Id" in c][0] if any("Id" in c for c in m_df.columns) else m_df.columns[0]
+            uzman_col = [c for c in m_df.columns if "Uzman" in c][0] if any("Uzman" in c for c in m_df.columns) else m_df.columns[1]
+            tarih_col = [c for c in m_df.columns if "Tarih" in c][0] if any("Tarih" in c for c in m_df.columns) else m_df.columns[2]
+            saat_col = [c for c in m_df.columns if "Saat" in c][0] if any("Saat" in c for c in m_df.columns) else m_df.columns[3]
+            durum_col = [c for c in m_df.columns if "Durum" in c][0] if any("Durum" in c for c in m_df.columns) else m_df.columns[4]
+            danisan_col = [c for c in m_df.columns if "Danisan" in c][0] if any("Danisan" in c for c in m_df.columns) else (m_df.columns[5] if len(m_df.columns) > 5 else "Alinan_Danisan")
             
             slot_etiketleri = [
-                f"ID: {r['Id']} | {r['Uzman']} | {r['Tarih']} {r['Saat']} | Durum: {r['Durum']} | Danışan: {r.get('Alinan_Danisan', '-')}"
+                f"ID: {r[id_col]} | {r[uzman_col]} | {r[tarih_col]} {r[saat_col]} | Durum: {r[durum_col]} | Danışan: {r.get(danisan_col, '-')}"
                 for _, r in m_df.iterrows()
             ]
             secilen_yonetim_slot = st.selectbox("İşlem Yapmak İstediğiniz Slotu Seçin", slot_etiketleri)
             secilen_slot_id = int(secilen_yonetim_slot.split("|")[0].replace("ID:", "").strip())
             
-            # Satır numarasını bul (başlık + 1)
-            slot_satir_no = m_df[m_df["Id"] == secilen_slot_id].index[0] + 2
-            m_headers = [str(h).strip().title() for h in musaitlik_sheet.row_values(1)]
+            slot_satir_no = m_df[m_df[id_col] == secilen_slot_id].index[0] + 2
+            
+            m_headers = [re.sub(r'[^a-zA-Z0-9_]', '', str(h)).strip().title() for h in musaitlik_sheet.row_values(1)]
             durum_col_idx = m_headers.index("Durum") + 1 if "Durum" in m_headers else 5
-            danisan_col_idx = m_headers.index("Alinan_Danisan") + 1 if "Alinan_Danisan" in m_headers else 6
+            danisan_col_idx = m_headers.index("Alinandanisan") + 1 if "Alinandanisan" in m_headers else 6
 
             c_btn1, c_btn2, c_btn3 = st.columns(3)
             with c_btn1:
