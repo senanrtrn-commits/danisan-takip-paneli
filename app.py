@@ -42,7 +42,6 @@ try:
     sheet = get_google_sheet()
     danisanlar_sheet = sheet.worksheet("Danisanlar")
     
-    # Musaitlikler sayfası kontrolü
     try:
         musaitlik_sheet = sheet.worksheet("Musaitlikler")
     except Exception:
@@ -59,6 +58,13 @@ def format_durum(deger):
         return "❌ Yapılmadı"
     return "⏳ Bekliyor"
 
+def isim_temizle(isim):
+    """'Sena Hoca', 'Psk. Sena' gibi unvanları temizler, kök ismi bulur."""
+    isim_str = str(isim).lower()
+    for unvan in ["hoca", "hocası", "psk", "psk.", "uzm", "uzm.", "dr", "dr."]:
+        isim_str = isim_str.replace(unvan, "")
+    return isim_str.strip()
+
 # 4. URL Parametresi Kontrolü (Sporcu Özel Randevu Ekranı)
 params = st.query_params
 secilen_sporcu_param = params.get("danisan", None)
@@ -72,7 +78,11 @@ if secilen_sporcu_param:
         data = danisanlar_sheet.get_all_records()
         df = pd.DataFrame(data)
         
-        danisan_row = df[df["Ad Soyad"].astype(str).str.lower() == secilen_sporcu_param.lower()] if "Ad Soyad" in df.columns else df[df["Ad_Soyad"].astype(str).str.lower() == secilen_sporcu_param.lower()]
+        # Danışan adını esnek bulma
+        df_cols = {c.strip(): c for c in df.columns}
+        ad_col = df_cols.get("Ad Soyad", df_cols.get("Ad_Soyad", list(df.columns)[1]))
+        
+        danisan_row = df[df[ad_col].astype(str).str.lower().str.strip() == secilen_sporcu_param.lower().strip()]
         
         if not danisan_row.empty:
             row_data = danisan_row.iloc[0]
@@ -81,30 +91,46 @@ if secilen_sporcu_param:
             
             st.markdown(f"**Görüşeceğiniz Uzman:** `{atanan_uzman}` | **Seans Türü:** `{atanan_gorusme}`")
             
-            # Uzmanın açık olan müsaitliklerini çek
+            # Musaitlikler sayfasını oku
             m_data = musaitlik_sheet.get_all_records()
             m_df = pd.DataFrame(m_data)
             
-            if not m_df.empty and "Uzman" in m_df.columns:
+            if not m_df.empty:
+                # Sütun başlıklarını normalize et
+                m_df.columns = [str(c).strip().title() for c in m_df.columns]
+                
+                uzman_kok = isim_temizle(atanan_uzman)
+                
+                # Eşleşen ve durumu 'Müsait' olan slotları filtrele
                 uygun_slotlar = m_df[
-                    (m_df["Uzman"].astype(str).str.lower().str.contains(atanan_uzman.lower()[:3])) & 
-                    (m_df["Durum"] == "Müsait")
+                    (m_df["Uzman"].astype(str).apply(isim_temizle).str.contains(uzman_kok)) & 
+                    (m_df["Durum"].astype(str).str.strip().str.lower() == "müsait")
                 ]
                 
                 if not uygun_slotlar.empty:
-                    slot_secenekleri = [f"{r['Tarih']} | {r['Saat']}" for _, r in uygun_slotlar.iterrows()]
+                    slot_secenekleri = [f"{str(r['Tarih']).strip()} | {str(r['Saat']).strip()}" for _, r in uygun_slotlar.iterrows()]
                     secilen_slot = st.selectbox("Size Uygun Randevu Saatini Seçin", slot_secenekleri)
                     
                     if st.button("Randevumu Onayla"):
                         secilen_tarih, secilen_saat = secilen_slot.split(" | ")
                         
-                        # Musaitlik slotunu kapat
-                        m_idx = uygun_slotlar[(uygun_slotlar["Tarih"] == secilen_tarih) & (uygun_slotlar["Saat"] == secilen_saat)].index[0] + 2
-                        m_headers = musaitlik_sheet.row_values(1)
-                        musaitlik_sheet.update_cell(m_idx, m_headers.index("Durum") + 1, "Dolu")
-                        musaitlik_sheet.update_cell(m_idx, m_headers.index("Alinan_Danisan") + 1, secilen_sporcu_param)
+                        # Musaitlik slotunu Dolu yap
+                        m_headers = [str(h).strip().title() for h in musaitlik_sheet.row_values(1)]
+                        orj_headers = musaitlik_sheet.row_values(1)
                         
-                        # Danışanın durumunu güncelle
+                        matched_row = uygun_slotlar[
+                            (uygun_slotlar["Tarih"].astype(str).str.strip() == secilen_tarih.strip()) & 
+                            (uygun_slotlar["Saat"].astype(str).str.strip() == secilen_saat.strip())
+                        ]
+                        
+                        m_idx = matched_row.index[0] + 2
+                        durum_col_idx = m_headers.index("Durum") + 1 if "Durum" in m_headers else 5
+                        danisan_col_idx = m_headers.index("Alinan_Danisan") + 1 if "Alinan_Danisan" in m_headers else 6
+                        
+                        musaitlik_sheet.update_cell(m_idx, durum_col_idx, "Dolu")
+                        musaitlik_sheet.update_cell(m_idx, danisan_col_idx, secilen_sporcu_param)
+                        
+                        # Danışanlar sayfasında bu haftalık durumu 'Yapıldı' yap
                         d_satir_no = danisan_row.index[0] + 2
                         d_headers = danisanlar_sheet.row_values(1)
                         if "Bu Hafta Durum" in d_headers:
@@ -114,7 +140,7 @@ if secilen_sporcu_param:
                         st.balloons()
                         st.cache_resource.clear()
                 else:
-                    st.warning(f"{atanan_uzman} için şu anda açık müsait saat bulunmamaktadır. Lütfen koordinatörünüz ile iletişime geçiniz.")
+                    st.warning(f"**{atanan_uzman}** için şu anda açık müsait saat bulunmamaktadır. Lütfen koordinatörünüz ile iletişime geçiniz.")
             else:
                 st.warning("Sistemde henüz girilmiş bir müsaitlik bulunmuyor.")
         else:
