@@ -64,9 +64,10 @@ except Exception as e:
 
 # 3. Yardımcı Fonksiyonlar
 def format_durum(deger):
-    if deger in [True, "Yapıldı", "True", "true", "TRUE", 1, "1"]:
+    deger_str = str(deger).strip().lower()
+    if deger_str in ["true", "1", "yapıldı", "✅ yapıldı", "yapildi"]:
         return "✅ Yapıldı"
-    elif deger in ["İptal", "Yapılmadı", "❌ İptal / Yapılmadı"]:
+    elif deger_str in ["iptal", "yapılmadı", "❌ yapılmadı", "yapilmadi", "iptal / yapılmadı"]:
         return "❌ Yapılmadı"
     return "⏳ Bekliyor"
 
@@ -153,11 +154,9 @@ if secilen_sporcu_param:
                     if st.button("Randevumu Onayla"):
                         secilen_tarih, secilen_saat = secilen_slot.split(" | ")
                         
-                        # 1. Google Takvim'e Etkinlik Ekleme
                         cal_ok, cal_result = takvime_etkinlik_yaz(secilen_sporcu_param, atanan_uzman, atanan_gorusme, secilen_tarih, secilen_saat)
                         
                         if cal_ok:
-                            # 2. Google E-Tablo'da slotu kapatma
                             m_headers = [re.sub(r'[^a-zA-Z0-9_]', '', str(h)).strip().title() for h in musaitlik_sheet.row_values(1)]
                             matched_row = uygun_slotlar[
                                 (uygun_slotlar[tarih_col].astype(str).str.strip() == secilen_tarih.strip()) & 
@@ -170,17 +169,16 @@ if secilen_sporcu_param:
                             musaitlik_sheet.update_cell(m_idx, durum_col_idx, "Dolu")
                             musaitlik_sheet.update_cell(m_idx, danisan_col_idx, secilen_sporcu_param)
                             
-                            # 3. Danışan tablosundaki durumu güncelleme
                             d_satir_no = danisan_row.index[0] + 2
                             d_headers = danisanlar_sheet.row_values(1)
                             if "Bu Hafta Durum" in d_headers:
-                                danisanlar_sheet.update_cell(d_satir_no, d_headers.index("Bu Hafta Durum") + 1, "Yapıldı")
+                                danisanlar_sheet.update_cell(d_satir_no, d_headers.index("Bu Hafta Durum") + 1, "Bekliyor")
                             
                             st.success(f"🎉 Randevunuz başarıyla oluşturuldu ve Google Takvim'e işlendi! ({secilen_tarih} - Saat {secilen_saat})")
                             st.balloons()
                             st.cache_resource.clear()
                         else:
-                            st.error(f"Google Takvim'e eklenirken bir yetki/bağlantı hatası oluştu:\n`{cal_result}`\nLütfen servis hesabının Takvimdeki 'Etkinlikleri Değiştirme' iznini kontrol edin.")
+                            st.error(f"Google Takvim'e eklenirken bir hata oluştu:\n`{cal_result}`")
                 else:
                     st.warning(f"**{atanan_uzman}** için şu anda açık müsait saat bulunmamaktadır. Lütfen koordinatörünüz ile iletişime geçiniz.")
             else:
@@ -203,10 +201,83 @@ sayfa = st.sidebar.radio("Menü", [
     "Tüm Danışan Listesi"
 ])
 
-# --- MENÜ 1: HAFTALIK GÖRÜŞME TAKVİMİ ---
+# --- MENÜ 1: HAFTALIK GÖRÜŞME TAKVİMİ & AKILLI TAKVİM EŞLEME ---
 if sayfa == "Haftalık Görüşme Takvimi":
     st.subheader("🗓️ Bu Haftanın Görüşme Planı")
     
+    col_sync, col_space = st.columns([3, 4])
+    with col_sync:
+        if st.button("🔄 Google Takvimden Emojileri Tara & Senkronize Et"):
+            with st.spinner("Takvim taranıyor (Tik ✅ -> Yapıldı, X ❌ -> Yapılmadı, Boş -> Bekliyor)..."):
+                try:
+                    data = danisanlar_sheet.get_all_records()
+                    df = pd.DataFrame(data)
+                    headers = danisanlar_sheet.row_values(1)
+                    
+                    gerekli_sutunlar = [
+                        "Bu Haftaki Görüşme", "Bu Haftaki Uzman", "Bu Hafta Durum",
+                        "Geçen Haftaki Görüşme", "Geçen Haftaki Uzman", "Geçen Hafta Durum"
+                    ]
+                    for sutun in gerekli_sutunlar:
+                        if sutun not in headers:
+                            danisanlar_sheet.update_cell(1, len(headers) + 1, sutun)
+                            headers.append(sutun)
+
+                    # Son 3 haftanın takvim kayıtlarını tara
+                    simdi = datetime.now(TR_TZ)
+                    zaman_min = (simdi - timedelta(days=21)).isoformat()
+                    zaman_max = (simdi + timedelta(days=7)).isoformat()
+                    
+                    events_result = calendar_service.events().list(
+                        calendarId=CALENDAR_ID,
+                        timeMin=zaman_min,
+                        timeMax=zaman_max,
+                        singleEvents=True,
+                        orderBy="startTime"
+                    ).execute()
+                    events = events_result.get("items", [])
+
+                    guncellenen_sayisi = 0
+                    for idx, row in df.iterrows():
+                        satir_no = idx + 2
+                        ad = str(row.get("Ad Soyad", row.get("Ad_Soyad", ""))).strip().lower()
+                        if not ad:
+                            continue
+                        ad_parcalari = [p for p in ad.split() if len(p) > 2]
+                        
+                        # Danışana ait en güncel eşleşen etkinliği bul
+                        for ev in reversed(events):
+                            summary = ev.get("summary", "")
+                            summary_lower = summary.lower()
+                            
+                            if any(p in summary_lower for p in ad_parcalari):
+                                start_iso = ev["start"].get("dateTime", ev["start"].get("date"))
+                                event_dt = datetime.fromisoformat(start_iso.replace("Z", "+00:00")).astimezone(TR_TZ)
+                                fark_gun = (simdi.date() - event_dt.date()).days
+                                
+                                # Emoji / Sembol Kontrolü
+                                if any(tik in summary for tik in ["✅", "✔️", "✓", "tik"]):
+                                    durum_degeri = "Yapıldı"
+                                elif any(carpi in summary for carpi in ["❌", "✖️", "iptal", "katılmadı"]):
+                                    durum_degeri = "Yapılmadı"
+                                else:
+                                    durum_degeri = "Bekliyor"
+                                
+                                # Haftalık aralığa göre sütun belirleme
+                                if 0 <= fark_gun <= 7:
+                                    danisanlar_sheet.update_cell(satir_no, headers.index("Bu Hafta Durum") + 1, durum_degeri)
+                                    guncellenen_sayisi += 1
+                                    break
+                                elif 7 < fark_gun <= 14:
+                                    danisanlar_sheet.update_cell(satir_no, headers.index("Geçen Hafta Durum") + 1, durum_degeri)
+                                    guncellenen_sayisi += 1
+                                    break
+                    
+                    st.success(f"Senkronizasyon tamamlandı! Toplam {guncellenen_sayisi} danışanın durumu takvimdeki sembollere göre güncellendi.")
+                    st.cache_resource.clear()
+                except Exception as e:
+                    st.error(f"Senkronizasyon hatası: {e}")
+
     try:
         data = danisanlar_sheet.get_all_records()
         df = pd.DataFrame(data)
@@ -268,7 +339,7 @@ if sayfa == "Haftalık Görüşme Takvimi":
                 })
                 
             st.dataframe(pd.DataFrame(haftalik_liste), use_container_width=True)
-            st.caption("💡 Seans onaylarını güncellemek veya uzman/seans tipi değiştirmek için **'Haftalık Planı Manuel Düzenle & Yoklama'** sekmesine geçin.")
+            st.caption("💡 Takvim başlıklarına **✅** (Yapıldı) veya **❌** (Yapılmadı) emojisi koyup butona basarak tüm yoklamaları tek tıkla çekebilirsiniz.")
         else:
             st.info("Tabloda kayıtlı danışan bulunmuyor.")
     except Exception as e:
