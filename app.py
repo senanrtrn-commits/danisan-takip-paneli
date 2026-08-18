@@ -10,6 +10,68 @@ from googleapiclient.discovery import build
 # 1. Sayfa Ayarları
 st.set_page_config(page_title="Mod7 & SG Danışan Takip & Randevu Sistemi", layout="wide")
 
+# --- ÖZEL LACİVERT, TURUNCU & ALTIN CSS TEMASI ---
+st.markdown("""
+<style>
+    /* Ana Başlıklar - Altın Sarısı */
+    h1, h2, h3 {
+        color: #E0A96D !important;
+        font-weight: 700 !important;
+        letter-spacing: 0.5px;
+    }
+    
+    /* Butonlar - Turuncu Gradyan & Gölge */
+    .stButton>button {
+        background: linear-gradient(135deg, #FF7A00 0%, #FF9E00 100%) !important;
+        color: #FFFFFF !important;
+        border: none !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+        padding: 0.5rem 1.2rem !important;
+        transition: all 0.3s ease !important;
+        box-shadow: 0 4px 14px rgba(255, 122, 0, 0.3) !important;
+    }
+    .stButton>button:hover {
+        transform: translateY(-2px) !important;
+        box-shadow: 0 6px 20px rgba(255, 122, 0, 0.5) !important;
+        color: #FFFFFF !important;
+    }
+
+    /* Bilgi & Durum Kartları (Metrikler) */
+    [data-testid="stMetric"] {
+        background: #1C2541 !important;
+        border: 1px solid #3A506B !important;
+        border-left: 5px solid #E0A96D !important;
+        padding: 12px 18px !important;
+        border-radius: 10px !important;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.25) !important;
+    }
+    [data-testid="stMetricLabel"] {
+        color: #A3CEF1 !important;
+        font-size: 0.9rem !important;
+    }
+    [data-testid="stMetricValue"] {
+        color: #FFFFFF !important;
+        font-size: 1.25rem !important;
+        font-weight: 700 !important;
+    }
+
+    /* Tablo Alanları */
+    .stDataFrame {
+        border-radius: 10px !important;
+        overflow: hidden !important;
+        border: 1px solid #3A506B !important;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.2) !important;
+    }
+
+    /* Bilgilendirme Kutuları */
+    .stAlert {
+        border-radius: 8px !important;
+        border-left: 4px solid #FF7A00 !important;
+    }
+</style>
+""", unsafe_allow_html=True)
+
 TR_TZ = timezone(timedelta(hours=3))
 CALENDAR_ID = "df72b1757a4992324ec30b83ff62a2956242153f3a3f9ed65e48a56f8138b723@group.calendar.google.com"
 
@@ -80,7 +142,6 @@ def tr_lower(metin):
     return m.replace("İ", "i").replace("I", "ı").replace("Ğ", "ğ").replace("Ü", "ü").replace("Ş", "ş").replace("Ö", "ö").replace("Ç", "ç").lower()
 
 def tarih_gun_formatla(tarih_str):
-    """'2026-08-19' formatını '2026-08-19 (ÇARŞAMBA)' şekline çevirir."""
     try:
         dt = datetime.strptime(str(tarih_str).strip(), "%Y-%m-%d")
         gun_adi = GUNLER_TR.get(dt.weekday(), "")
@@ -432,7 +493,6 @@ elif sayfa == "🗓️ Hoca Müsaitlik Girişi":
             if m_data:
                 gosterim_df = pd.DataFrame(m_data)
                 
-                # Tablodaki Tarih sütununu formatla
                 t_cols = [c for c in gosterim_df.columns if "Tarih" in c]
                 if t_cols:
                     t_col = t_cols[0]
