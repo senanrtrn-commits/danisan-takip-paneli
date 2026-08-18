@@ -35,7 +35,8 @@ def get_services():
     scopes = [
         "https://www.googleapis.com/auth/spreadsheets",
         "https://www.googleapis.com/auth/drive",
-        "https://www.googleapis.com/auth/calendar"
+        "https://www.googleapis.com/auth/calendar",
+        "https://www.googleapis.com/auth/calendar.events"
     ]
     if "credentials_json" in st.secrets:
         creds_dict = json.loads(st.secrets["credentials_json"])
@@ -94,12 +95,12 @@ def takvime_etkinlik_yaz(danisan, uzman, gorusme_tipi, tarih_str, saat_str, konu
         summary = f"{danisan} {uzman} {gorusme_tipi} {konum}".strip()
         event_body = {
             "summary": summary,
-            "description": f"Mod7 & SG Otomatik Randevu: {gorusme_tipi} | Uzman: {uzman}",
+            "description": f"Mod7 & SG Randevu Sistemi: {gorusme_tipi} | Uzman: {uzman}",
             "start": {"dateTime": baslangic_dt.isoformat()},
             "end": {"dateTime": bitis_dt.isoformat()},
         }
-        calendar_service.events().insert(calendarId=CALENDAR_ID, body=event_body).execute()
-        return True, "Randevu Google Takvim'e başarıyla eklendi."
+        res = calendar_service.events().insert(calendarId=CALENDAR_ID, body=event_body).execute()
+        return True, res.get("htmlLink", "")
     except Exception as e:
         return False, str(e)
 
@@ -152,31 +153,34 @@ if secilen_sporcu_param:
                     if st.button("Randevumu Onayla"):
                         secilen_tarih, secilen_saat = secilen_slot.split(" | ")
                         
-                        # 1. Google Takvim'e otomatik etkinlik ekleme
-                        cal_ok, cal_msg = takvime_etkinlik_yaz(secilen_sporcu_param, atanan_uzman, atanan_gorusme, secilen_tarih, secilen_saat)
+                        # 1. Google Takvim'e Etkinlik Ekleme
+                        cal_ok, cal_result = takvime_etkinlik_yaz(secilen_sporcu_param, atanan_uzman, atanan_gorusme, secilen_tarih, secilen_saat)
                         
-                        # 2. Google E-Tablo'da slotu kapatma
-                        m_headers = [re.sub(r'[^a-zA-Z0-9_]', '', str(h)).strip().title() for h in musaitlik_sheet.row_values(1)]
-                        matched_row = uygun_slotlar[
-                            (uygun_slotlar[tarih_col].astype(str).str.strip() == secilen_tarih.strip()) & 
-                            (uygun_slotlar[saat_col].astype(str).str.strip() == secilen_saat.strip())
-                        ]
-                        m_idx = matched_row.index[0] + 2
-                        durum_col_idx = m_headers.index("Durum") + 1 if "Durum" in m_headers else 5
-                        danisan_col_idx = m_headers.index("Alinandanisan") + 1 if "Alinandanisan" in m_headers else 6
-                        
-                        musaitlik_sheet.update_cell(m_idx, durum_col_idx, "Dolu")
-                        musaitlik_sheet.update_cell(m_idx, danisan_col_idx, secilen_sporcu_param)
-                        
-                        # 3. Danışan tablosundaki durumu güncelleme
-                        d_satir_no = danisan_row.index[0] + 2
-                        d_headers = danisanlar_sheet.row_values(1)
-                        if "Bu Hafta Durum" in d_headers:
-                            danisanlar_sheet.update_cell(d_satir_no, d_headers.index("Bu Hafta Durum") + 1, "Yapıldı")
-                        
-                        st.success(f"🎉 Randevunuz oluşturuldu ve Google Takvim'e işlendi! ({secilen_tarih} - Saat {secilen_saat})")
-                        st.balloons()
-                        st.cache_resource.clear()
+                        if cal_ok:
+                            # 2. Google E-Tablo'da slotu kapatma
+                            m_headers = [re.sub(r'[^a-zA-Z0-9_]', '', str(h)).strip().title() for h in musaitlik_sheet.row_values(1)]
+                            matched_row = uygun_slotlar[
+                                (uygun_slotlar[tarih_col].astype(str).str.strip() == secilen_tarih.strip()) & 
+                                (uygun_slotlar[saat_col].astype(str).str.strip() == secilen_saat.strip())
+                            ]
+                            m_idx = matched_row.index[0] + 2
+                            durum_col_idx = m_headers.index("Durum") + 1 if "Durum" in m_headers else 5
+                            danisan_col_idx = m_headers.index("Alinandanisan") + 1 if "Alinandanisan" in m_headers else 6
+                            
+                            musaitlik_sheet.update_cell(m_idx, durum_col_idx, "Dolu")
+                            musaitlik_sheet.update_cell(m_idx, danisan_col_idx, secilen_sporcu_param)
+                            
+                            # 3. Danışan tablosundaki durumu güncelleme
+                            d_satir_no = danisan_row.index[0] + 2
+                            d_headers = danisanlar_sheet.row_values(1)
+                            if "Bu Hafta Durum" in d_headers:
+                                danisanlar_sheet.update_cell(d_satir_no, d_headers.index("Bu Hafta Durum") + 1, "Yapıldı")
+                            
+                            st.success(f"🎉 Randevunuz başarıyla oluşturuldu ve Google Takvim'e işlendi! ({secilen_tarih} - Saat {secilen_saat})")
+                            st.balloons()
+                            st.cache_resource.clear()
+                        else:
+                            st.error(f"Google Takvim'e eklenirken bir yetki/bağlantı hatası oluştu:\n`{cal_result}`\nLütfen servis hesabının Takvimdeki 'Etkinlikleri Değiştirme' iznini kontrol edin.")
                 else:
                     st.warning(f"**{atanan_uzman}** için şu anda açık müsait saat bulunmamaktadır. Lütfen koordinatörünüz ile iletişime geçiniz.")
             else:
