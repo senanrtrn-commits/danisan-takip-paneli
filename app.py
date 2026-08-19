@@ -75,7 +75,6 @@ st.markdown("""
 TR_TZ = timezone(timedelta(hours=3))
 CALENDAR_ID = "df72b1757a4992324ec30b83ff62a2956242153f3a3f9ed65e48a56f8138b723@group.calendar.google.com"
 
-# Hoca & Koordinatör E-Posta Listesi
 KOORDINATOR_EMAIL = "koraykun@gmail.com"
 
 UZMAN_EMAILLERI = {
@@ -200,25 +199,21 @@ def takvime_etkinlik_yaz(danisan, uzman, gorusme_tipi, tarih_str, saat_str, konu
         baslangic_dt = datetime.combine(tarih_dt, saat_dt, tzinfo=TR_TZ)
         bitis_dt = baslangic_dt + timedelta(hours=1)
         
-        # Katılımcıları (Hoca + Koordinatör) belirleme
         uzman_anahtar = isim_temizle(uzman)
-        attendees = [{"email": KOORDINATOR_EMAIL}]
-        
+        uzman_email = ""
         for k, v in UZMAN_EMAILLERI.items():
             if k in uzman_anahtar:
-                attendees.append({"email": v})
+                uzman_email = v
                 break
 
         summary = f"{danisan} {uzman} {gorusme_tipi} {konum}".strip()
         event_body = {
             "summary": summary,
-            "description": f"Mod7 & SG Randevu Sistemi: {gorusme_tipi} | Uzman: {uzman}\nDanışan: {danisan}",
+            "description": f"Mod7 & SG Randevu Sistemi\nDanışan: {danisan}\nUzman: {uzman} ({uzman_email})\nKoordinatör: {KOORDINATOR_EMAIL}\nGörüşme Türü: {gorusme_tipi}",
             "start": {"dateTime": baslangic_dt.isoformat()},
             "end": {"dateTime": bitis_dt.isoformat()},
-            "attendees": attendees,
         }
-        # sendUpdates="all" sayesinde hem hocaya hem koordinatöre resmi takvim davetiyesi ve e-posta bildirimi gider
-        res = calendar_service.events().insert(calendarId=CALENDAR_ID, body=event_body, sendUpdates="all").execute()
+        res = calendar_service.events().insert(calendarId=CALENDAR_ID, body=event_body).execute()
         return True, res.get("htmlLink", "")
     except Exception as e:
         return False, str(e)
@@ -278,7 +273,6 @@ if secilen_sporcu_param:
                     if st.button("Randevumu Onayla"):
                         secilen_tarih, secilen_saat = slot_map[secilen_etiket]
                         
-                        # Google Takvim'e Katılımcı Bildirimli Etkinlik Ekleme
                         cal_ok, cal_result = takvime_etkinlik_yaz(secilen_sporcu_param, atanan_uzman, atanan_gorusme, secilen_tarih, secilen_saat)
                         
                         if cal_ok:
@@ -300,7 +294,7 @@ if secilen_sporcu_param:
                             if bu_hafta_col_idx:
                                 danisanlar_sheet.update_cell(d_satir_no, bu_hafta_col_idx, "Bekliyor")
                             
-                            st.success(f"🎉 Randevunuz başarıyla oluşturuldu! {atanan_uzman} ve koordinatöre takvim davetiyesi iletildi. ({tarih_gun_formatla(secilen_tarih)} - Saat {secilen_saat})")
+                            st.success(f"🎉 Randevunuz başarıyla oluşturuldu ve Google Takvim'e işlendi! ({tarih_gun_formatla(secilen_tarih)} - Saat {secilen_saat})")
                             st.balloons()
                             st.cache_resource.clear()
                         else:
